@@ -1,118 +1,101 @@
 # Folio Lab
 
-**Pooled portfolios of tokenized US stocks on BNB Smart Chain.**
+**Pooled portfolios of tokenized US stocks on Solana.**
 
-A curator opens a vault and publishes, on-chain, a plan for what they intend to buy. Investors deposit USDT and receive vault shares. The curator invests the pooled USDT in tokenized stocks (Ondo's AAPLon, NVDAon, AVGOon, TSMon) through the Binance Web3 trading router.
+A curator opens a vault and publishes, on-chain, a plan for what they intend to buy. Investors deposit USDC and receive vault shares. The curator invests the pooled USDC in tokenized stocks through an allowlisted swap program (Jupiter on mainnet; a mock router on devnet).
 
-Built for the BNB Chain Tokenized Stocks hackathon.
+Ported from our BNB Chain hackathon build (Solidity) to a Solana program in Rust (Anchor).
 
 | | |
 |---|---|
 | Live app | _Vercel URL: to be added_ |
-| Chain | BSC mainnet (chainId 56) |
-| Binance Web3 API | Market API (RWA tokens, platforms, underlying market data) and Aggregator API (quote, swap) |
-| Stack | Solidity 0.8.30 + Foundry · Next.js 16 + React 19 · wagmi + viem |
+| Cluster | Solana devnet (mock stock tokens and mock router) |
+| Program | `folio_vault` — `9PY9RRXQuMtHXDyvWNL5ohFrsSux5SLrJhhdtuBgLUJH` (devnet deploy: to be added) |
+| Stack | Rust + Anchor 1.2.1 · LiteSVM tests · Next.js 16 + React 19 |
 
-## What the contracts guarantee
+## What the program guarantees
 
-- **The curator can trade but can never withdraw.** A trade can only swap one allowlisted token for another through an allowlisted router. Balance checks before and after each trade make sure nothing else leaves the vault.
-- **Each trade can lose at most 2%.** The vault values both sides of every trade at signed market prices and reverts if the value bought is below 98% of the value sold.
-- **Withdrawals never close.** Any holder can redeem their share of every holding at any time, even while the vault is paused. If one stock token is frozen, `redeemExcept` lets a holder leave it behind and take the rest.
-- **Deposits never dilute existing holders.** New shares are priced from the vault's full holdings, using backend-signed prices (EIP-712, at most 60 s old) and rounded in favour of existing holders.
-- **The plan is public.** `setPlan` stores the curator's plan as free text, with a version number. A plan must exist before the first trade, and every `Rebalanced` event records which plan version it ran under.
-
-## Mainnet deployment
-
-| Contract | Address |
-|---|---|
-| AssetRegistry | [`0x9262e9FA139113B32621581FD38250C7Da257ba7`](https://bscscan.com/address/0x9262e9FA139113B32621581FD38250C7Da257ba7) |
-| VaultFactory | [`0x4F0e39A8d9D3cB7a4D77B77aD310CC3969F15603`](https://bscscan.com/address/0x4F0e39A8d9D3cB7a4D77B77aD310CC3969F15603) |
-| Binance router (allowlisted) | [`0xB44446b0c8E56988c34f7Ff73Ae904982b5FdDA5`](https://bscscan.com/address/0xB44446b0c8E56988c34f7Ff73Ae904982b5FdDA5) |
-| USDT | [`0x55d398326f99059fF775485246999027B3197955`](https://bscscan.com/address/0x55d398326f99059fF775485246999027B3197955) |
-
-Allowlisted stocks: [AAPLon](https://bscscan.com/token/0x390a684EF9cADE28A7AD0DFa61AB1Eb3842618c4), [NVDAon](https://bscscan.com/token/0xA9eE28C80f960B889dFbd1902055218cBa016F75), [AVGOon](https://bscscan.com/token/0x0ED2E3180EDf393e6bf8Db124bD15DDD54dE150A), [TSMon](https://bscscan.com/token/0xC37042A7a4fa510D8884a433762aB87257B91965).
-
-### Demo transactions
-
-_To be added after the mainnet run: create vault, seed, post plan, rebalance, deposit, redeem._
+- **The curator can trade but can never withdraw.** A trade swaps one allowlisted token for another through an allowlisted swap program. The vault signs for the swap, then checks every held balance and that no vault token account gained a delegate, a close authority or a new owner.
+- **Each trade can lose at most 2%.** Both sides are valued at signed prices; the trade reverts if the value bought is below 98% of the value sold.
+- **Withdrawals never close.** Any holder can redeem their share of every holding at any time, even while the vault is paused. A frozen token can be forfeited so it never blocks exit.
+- **Deposits never dilute existing holders.** New shares are priced from the vault's full holdings using backend-signed prices (ed25519, at most 60 s old), rounded in favour of existing holders.
+- **The plan is public.** `set_plan` stores the curator's plan as free text with a version number. A plan must exist before the first trade, and every `Rebalanced` event records the plan version.
+- **Shares cannot be transferred.** They live in a per-investor `Position` account, not a token.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    Investor -- "deposit USDT / redeem shares" --> Vault[FolioVault]
-    Curator -- "setPlan, rebalance" --> Vault
-    Vault -- "swap" --> Router[Binance router]
-    API["Next.js API (price signer)"] -- "signed prices" --> Investor
-    API -- "signed prices, swap calldata" --> Curator
-    API -- "quotes, RWA prices" --- Binance[Binance Web3 API]
-    Vault -- "verify prices, allowlists" --> Registry[AssetRegistry]
-    Factory[VaultFactory] -- creates --> Vault
+    Investor -- "deposit USDC / redeem shares" --> Vault[Vault PDA]
+    Curator -- "set_plan, rebalance" --> Vault
+    Vault -- "CPI swap, vault signs" --> Router[Jupiter / mock_router]
+    API["Next.js API (price signer)"] -- "ed25519-signed prices" --> Investor
+    API -- "signed prices, swap route" --> Curator
+    Vault -- "allowlists, price signer" --> Registry[Registry PDA]
 ```
 
-1. **Create.** Anyone calls `VaultFactory.createVault` and names a manager (the curator).
-2. **Seed and activate.** The first deposit (`seed`, at least 10 USDT) sets the starting share price, then the guardian activates the vault.
-3. **Plan.** The curator posts the plan (`setPlan`). Investors see it on the vault page.
-4. **Deposit.** The investor approves USDT. The app fetches signed prices from `/api/prices` and calls `deposit`.
-5. **Rebalance.** The curator console calls `/api/trade`, which gets a Binance quote and swap calldata addressed to the vault, and `/api/prices`, then sends `rebalance`.
+1. **Create.** Anyone calls `create_vault` and names a manager (the curator).
+2. **Seed and activate.** The first deposit (`seed`, at least 10 USDC) sets 1 share = 1 USDC; the guardian then activates the vault.
+3. **Plan.** The curator posts the plan (`set_plan`). Investors see it on the vault page.
+4. **Deposit.** The app fetches signed prices from `/api/prices` and sends an Ed25519 verify instruction followed by `deposit` in one transaction.
+5. **Rebalance.** The curator console gets a swap route from `/api/trade` and prices from `/api/prices`, then sends `rebalance`.
 6. **Redeem.** Holders burn shares and receive their percentage of each held token directly.
 
-Why prices are signed off-chain: no reliable on-chain price feed exists for these stock tokens on BSC. The backend reads Binance RWA prices, refuses to sign a token Binance does not report as trading or whose price is more than 2% away from the underlying stock's reference price, and signs an EIP-712 `PriceUpdate` that the registry verifies on-chain.
+Why prices are signed off-chain: these stock tokens have no reliable on-chain price yet. The backend reads market prices, refuses to sign a token that is not trading or whose price is more than 2% from the underlying stock, and signs the update; the program checks the signature through the Ed25519 program.
 
 ## Repository
 
 | Path | What |
 |---|---|
-| `contracts/` | Foundry project: `AssetRegistry`, `VaultFactory`, `FolioVault`, deploy script, 144 tests. See [`contracts/README.md`](contracts/README.md). |
+| `anchor/` | Anchor workspace: `folio_vault` and `mock_router` programs, LiteSVM tests. See [`anchor/README.md`](anchor/README.md). |
 | `app/api/` | Route handlers: `/api/prices`, `/api/trade`, `/api/vaults`, `/api/history` |
-| `lib/binance/` | Signed Binance Web3 API client |
-| `lib/contracts/` | ABIs, deployed addresses, wagmi config and hooks |
+| `lib/binance/` | Binance Web3 API client (price source) |
+| `lib/contracts/` | Program IDs, IDL and client hooks _(being ported from wagmi/viem)_ |
 | `app/page.tsx`, `components/` | Investor app: vault list, vault page, deposit, withdraw |
 | `app/curator/`, `components/curator/` | Curator console: create, seed, plan, rebalance |
-| `api/` | Standalone Binance Web3 API explorer used during development |
-| `docs/` | Contract spec and product requirements |
+| `docs/` | Contract spec and product requirements (EVM version) |
 
 ## Run it locally
 
-Requirements: Node 24, [Foundry](https://book.getfoundry.sh/), and a Binance Web3 API key from the [developer portal](https://web3.binance.com/en/dev-portal/project).
+Requirements: Node 24, Rust (via `rustup`), Solana CLI and Anchor 1.2.1 (`brew install solana anchor`), and `cargo-build-sbf` from the [Agave release](https://github.com/anza-xyz/agave/releases).
 
 ```bash
 npm install
-cp .env.example .env.local     # fill in the Binance key/secret and a price-signer key
+cp .env.example .env.local     # see the comments in it for every value
 ```
 
-### Against a local chain (no real funds)
+### Programs
 
 ```bash
-anvil --block-time 1           # terminal 1
-scripts/dev-chain.sh           # terminal 2: deploys contracts and two demo vaults
+cd anchor
+anchor build --arch v0
+cargo test -p folio_vault      # full flow + refusal cases, no validator needed
+```
+
+### Deploy to devnet
+
+_Deploy script and resulting addresses: to be added._
+
+### App
+
+```bash
 npm run dev                    # http://localhost:3000, curator console at /curator
 ```
 
-Set `CHAIN_RPC_URL=http://127.0.0.1:8545` in `.env.local`, and import anvil account 0 into your wallet.
+## Status
 
-### Against BSC mainnet
-
-In `.env.local`, set `CHAIN_RPC_URL` to a BSC RPC endpoint and `PRICE_SIGNER_PRIVATE_KEY` to the key of the registry's price signer. Then:
-
-```bash
-NEXT_PUBLIC_CHAIN=bsc NEXT_PUBLIC_RPC_URL=https://bsc-dataseed.bnbchain.org npm run dev
-```
-
-### Tests
-
-```bash
-cd contracts && forge test                                   # contracts
-forge test --match-contract SimulationTest -vv               # the whole flow as a story
-npm test                                                     # app and API
-```
+| Part | State |
+|---|---|
+| Solana program + tests | Done (11 tests passing) |
+| Devnet deployment | To do |
+| Backend (ed25519 price signer, Solana reads) | To do |
+| Frontend (Solana wallet adapter) | To do |
 
 ## Limits and known issues
 
-- **Liquidity is the real constraint.** Before allowlisting, we surveyed Binance routes on a mainnet fork at 200 and 1,000 USDT. AAPLon, NVDAon, AVGOon and TSMon filled within 1%. Other Ondo tokens lost 6–96% or could not be quoted, so they are not allowlisted.
-- **Hackathon governance.** The deployer is both registry owner and guardian, with no timelock. Production needs a timelock and a multisig.
-- **Deposits trust the backend's price signer.** A compromised signer could misprice deposits, although it can never move funds out of a vault.
-- Open security findings are listed in [`contracts/KNOWN_ISSUES.md`](contracts/KNOWN_ISSUES.md). They were accepted for the demo and must be fixed before real investor money goes in.
+- **Devnet only for now.** Real tokenized stocks (e.g. xStocks) and Jupiter liquidity exist only on mainnet; the demo uses mock tokens and a mock router that swaps at the rate it is given. The vault's 2% check still applies.
+- **Hackathon governance.** The deployer is registry admin and guardian, with no timelock. Production needs a multisig.
+- **Deposits trust the backend's price signer.** A compromised signer could misprice deposits, but can never move funds out of a vault.
 
 ## Developer-experience report
 
