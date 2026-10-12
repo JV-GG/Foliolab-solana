@@ -965,11 +965,15 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
               />
             </div>
 
-            {vault.openProposal && isProposalClosedLocally && (
-              <div className="mt-3 rounded border border-[#c2b280] bg-[#fffbf0] p-2.5 text-[10px] text-[#7a6b32]">
-                Proposal #{vault.openProposal.id} on this vault has been concluded & refunded. Note: on Solana devnet, the program allows 1 proposal per vault at a time until the voting duration expires. If you want to propose another vote immediately, test with a newly created vault.
+            {error && (
+              <div className="mt-3 rounded border border-[#a14343] bg-[#fbf2f2] p-2.5 text-[10px] font-medium text-[#a14343]">
+                {error}
               </div>
             )}
+
+            <div className="mt-3 rounded border border-[#c2b280] bg-[#fffbf0] p-2.5 text-[10px] text-[#7a6b32]">
+              <strong>Devnet Governance Rule:</strong> The Solana smart contract enforces 1 proposal cycle per vault at a time until the voting duration concludes. To create and test a new proposal cycle immediately, click <strong>+ Create vault</strong> in the manager studio!
+            </div>
 
             <div className="mt-5 flex gap-2">
               <button

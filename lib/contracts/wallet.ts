@@ -94,13 +94,21 @@ export function useSendTransaction() {
         if (tx) {
           try {
             const sim = await connection.simulateTransaction(tx as any);
-            if (sim.value.logs) {
-              const anchorErr = sim.value.logs.find((l: string) => l.includes('Error Message:'));
-              if (anchorErr) {
-                throw new Error(anchorErr.replace(/^.*Error Message:\s*/, ''));
-              }
+            const logs = sim?.value?.logs || [];
+            const anchorErr = logs.find((l: string) => l.includes('Error Message:'));
+            if (anchorErr) {
+              throw new Error(anchorErr.replace(/^.*Error Message:\s*/, ''));
+            }
+            const codeErr = logs.find((l: string) => l.includes('Error Code:'));
+            if (codeErr) {
+              throw new Error(codeErr.replace(/^.*Error Code:\s*/, ''));
             }
           } catch (simErr: any) {
+            const logs = simErr?.logs || simErr?.error?.logs || [];
+            const anchorErr = logs.find((l: string) => l.includes('Error Message:'));
+            if (anchorErr) {
+              throw new Error(anchorErr.replace(/^.*Error Message:\s*/, ''));
+            }
             if (simErr.message && !simErr.message.includes('Unexpected error')) {
               throw simErr;
             }
