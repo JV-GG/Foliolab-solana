@@ -22,6 +22,7 @@ import {
   vaultPda,
 } from '@/lib/solana/program';
 import type {SignedPrices, TradeQuote} from './model';
+import type {VaultView} from '@/lib/vaults/read';
 
 export type CuratorAction =
   | 'idle'
@@ -360,6 +361,47 @@ export function useCuratorActions() {
     [connection, refresh, requireWallet, send],
   );
 
+  const forceRebalance = useCallback(
+    async (
+      vault: VaultView,
+      onStage?: (stage: RebalanceStage) => void,
+    ): Promise<RebalanceResult> => {
+      setAction('simulating');
+      onStage?.('simulating');
+      try {
+        const crankRes = await fetch(`/api/crank?vault=${vault.address}&force=true`);
+        const crankData = await crankRes.json();
+        const rec = crankData.recommendation;
+        if (!rec || !rec.overweightAsset || !rec.underweightAsset || !rec.suggestedSellAmount) {
+          throw new Error(rec?.reason || 'Portfolio is already balanced within target weights.');
+        }
+
+        const quoteRes = await fetch(
+          `/api/trade?vault=${vault.address}&sell=${rec.overweightAsset}&buy=${rec.underweightAsset}&amount=${rec.suggestedSellAmount}&slippage=1`,
+        );
+        if (!quoteRes.ok) {
+          const body = await quoteRes.json().catch(() => null);
+          throw new Error(body?.error || 'Failed to fetch swap route');
+        }
+        const quoteData = await quoteRes.json();
+
+        const pricesRes = await fetch(
+          `/api/prices?vault=${vault.address}&include=${rec.underweightAsset}`,
+        );
+        if (!pricesRes.ok) {
+          const body = await pricesRes.json().catch(() => null);
+          throw new Error(body?.error || 'Failed to fetch signed prices');
+        }
+        const pricesData = await pricesRes.json();
+
+        return await executeRebalance(vault.address, quoteData, pricesData, onStage);
+      } finally {
+        setAction('idle');
+      }
+    },
+    [executeRebalance],
+  );
+
   return {
     action,
     createAndSeed,
@@ -370,6 +412,7 @@ export function useCuratorActions() {
     proposeStrategy,
     fundGas,
     executeRebalance,
+    forceRebalance,
   };
 }
 

@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/folio_vault.json`.
  */
 export type FolioVault = {
-  "address": "9PY9RRXQuMtHXDyvWNL5ohFrsSux5SLrJhhdtuBgLUJH",
+  "address": "CgbMfovmjXQvmLRSSh5s4Qu1ZdD8DYk8jUwvUYuP4UmR",
   "metadata": {
     "name": "folioVault",
     "version": "0.1.0",

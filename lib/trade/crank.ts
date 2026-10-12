@@ -29,7 +29,7 @@ export interface RebalanceRecommendation {
 /**
  * Calculates drift against target weights and identifies the optimal trade to rebalance.
  */
-export function evaluateRebalance(vault: VaultView): RebalanceRecommendation {
+export function evaluateRebalance(vault: VaultView, ignoreCooldown: boolean = false): RebalanceRecommendation {
   if (vault.state !== 'ACTIVE') {
     return {eligible: false, reason: `Vault is ${vault.state}, not ACTIVE`};
   }
@@ -44,7 +44,7 @@ export function evaluateRebalance(vault: VaultView): RebalanceRecommendation {
   const cycleStart = vault.cycleStart ?? 0;
   const interval = vault.rebalanceIntervalSeconds ?? 43200;
   // If cycle was already started, check if within the 15-minute window or if 12h has elapsed
-  if (cycleStart > 0 && nowSec > cycleStart + 900 && nowSec < cycleStart + interval) {
+  if (!ignoreCooldown && cycleStart > 0 && nowSec > cycleStart + 900 && nowSec < cycleStart + interval) {
     const hoursLeft = Math.ceil((cycleStart + interval - nowSec) / 3600);
     return {eligible: false, reason: `Rebalance cycle cooldown active (~${hoursLeft}h remaining)`};
   }

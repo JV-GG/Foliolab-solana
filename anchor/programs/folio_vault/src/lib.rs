@@ -29,7 +29,7 @@ pub use instructions::*;
 pub use prices::*;
 pub use state::*;
 
-declare_id!("9PY9RRXQuMtHXDyvWNL5ohFrsSux5SLrJhhdtuBgLUJH");
+declare_id!("CgbMfovmjXQvmLRSSh5s4Qu1ZdD8DYk8jUwvUYuP4UmR");
 
 #[program]
 pub mod folio_vault {

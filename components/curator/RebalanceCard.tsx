@@ -19,7 +19,7 @@ const QUOTE_LIFETIME_MS = 60_000;
 
 export function RebalanceCard({vault, managerAllowed}: Props) {
   const notify = useNotify();
-  const {action, executeRebalance} = useCuratorActions();
+  const {action, executeRebalance, forceRebalance} = useCuratorActions();
   const assets = useMemo(() => curatorAssets(vault), [vault]);
   const sellable = vault.holdings.filter((holding) => holding.amount !== '0');
   const tokenSymbol = useTokenSymbols(assets);
@@ -39,6 +39,8 @@ export function RebalanceCard({vault, managerAllowed}: Props) {
   const [executionStage, setExecutionStage] = useState<RebalanceStage>('idle');
   const [executionError, setExecutionError] = useState<string | null>(null);
   const [transactionHash, setTransactionHash] = useState<string | null>(null);
+  const [forcePending, setForcePending] = useState(false);
+  const [forceError, setForceError] = useState<string | null>(null);
 
   const active = vault.state === 'ACTIVE';
   const planReady = Boolean(vault.plan && vault.plan.version > 0);
@@ -178,6 +180,22 @@ export function RebalanceCard({vault, managerAllowed}: Props) {
   const prepared = Boolean(quote && signedPrices);
   const isPackageExpired = !executing && executionStage !== 'confirmed' && (quoteExpired || pricesExpired);
 
+  async function handleForceRebalance() {
+    if (!managerAllowed || !active || forcePending) return;
+    setForceError(null);
+    setForcePending(true);
+    try {
+      const res = await forceRebalance(vault);
+      notify(`Forced rebalance executed! Signature: ${res.hash.slice(0, 8)}…`);
+    } catch (err) {
+      const msg = explainError(err);
+      setForceError(msg);
+      notify(msg);
+    } finally {
+      setForcePending(false);
+    }
+  }
+
   return (
     <section>
       <div className="flex items-start justify-between gap-3">
@@ -197,6 +215,48 @@ export function RebalanceCard({vault, managerAllowed}: Props) {
           {!planReady && <span className="block">Publish an on-chain plan before trading.</span>}
         </div>
       )}
+
+      {/* Autonomous Target Rebalance (Curator Force Mode for Demo) */}
+      <div className="mt-5 rounded-2xl border border-[#237b68]/30 bg-[#f4f7f2] p-4 shadow-sm">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <span className="eyebrow text-[#237b68]">AUTONOMOUS TARGET REBALANCE</span>
+            <h3 className="font-editorial text-[18px] font-medium tracking-tight text-[#2b3a30]">
+              Keeper Crank & Demo Override
+            </h3>
+          </div>
+          <span className="shrink-0 rounded-full border border-[#237b68]/20 bg-[#dfede8] px-2.5 py-1 font-mono text-[10px] font-bold text-[#237b68]">
+            Fee: 20,000 lamports
+          </span>
+        </div>
+
+        <p className="mt-2 text-[11px] leading-[1.6] text-[#556156]">
+          Normally scheduled every 12 hours by the permissionless keeper network. As vault curator, you can force an immediate rebalance now for demonstration, pulling the 20,000 lamport gas reimbursement from the vault tank.
+        </p>
+
+        {forceError && (
+          <div className="mt-2 border-l-2 border-[#a14343] pl-2 text-[11px] text-[#8f3e3e]">
+            {forceError}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => void handleForceRebalance()}
+          disabled={!managerAllowed || !active || forcePending || executing}
+          className="folio-button-primary mt-3 flex w-full items-center justify-center gap-2"
+        >
+          {forcePending ? 'Executing on-chain rebalance…' : '⚡ Force Rebalance Toward Targets Now'}
+        </button>
+      </div>
+
+      <div className="mt-6 flex items-center gap-3">
+        <div className="h-px flex-1 bg-[#d8ded6]" />
+        <span className="text-[10px] font-bold uppercase tracking-wider text-[#79857a]">
+          Or Manual Custom Trade
+        </span>
+        <div className="h-px flex-1 bg-[#d8ded6]" />
+      </div>
 
       <div className="mt-4 grid gap-3">
         <div className="grid grid-cols-2 gap-2">

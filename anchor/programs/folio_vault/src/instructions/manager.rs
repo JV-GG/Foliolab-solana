@@ -58,9 +58,9 @@ pub fn handle_set_strategy(ctx: Context<ManagerOnly>, text: String, targets: Vec
 
 #[derive(Accounts)]
 pub struct Rebalance<'info> {
-    /// The registry's keeper. Pays the transaction and any new token account, and is paid back a
-    /// flat fee from the vault's gas tank.
-    #[account(mut, address = registry.keeper @ FolioError::NotKeeper)]
+    /// The registry's keeper OR the vault manager. Pays the transaction and any new token account,
+    /// and is paid back a flat fee from the vault's gas tank.
+    #[account(mut)]
     pub keeper: Signer<'info>,
     #[account(seeds = [REGISTRY_SEED], bump = registry.bump)]
     pub registry: Box<Account<'info, Registry>>,
@@ -123,12 +123,18 @@ pub fn handle_rebalance<'info>(
     require!(a.registry.is_router(a.router.key), FolioError::RouterNotAllowed);
     require!(sell != buy && a.registry.is_asset(&buy), FolioError::AssetNotAllowed);
     require!(a.vault.held.contains(&sell), FolioError::AssetNotHeld);
+    let is_keeper = a.keeper.key() == a.registry.keeper;
+    let is_manager = a.keeper.key() == a.vault.manager;
+    require!(is_keeper || is_manager, FolioError::NotKeeper);
+
     require!(a.vault.gas_tank >= KEEPER_FEE_LAMPORTS, FolioError::GasTankEmpty);
     check_prices(&prices, &a.registry.key(), &a.registry, &a.instructions.to_account_info())?;
 
     let now = Clock::get()?.unix_timestamp;
     let new_cycle = a.vault.cycle_start == 0 || now >= a.vault.cycle_start + REBALANCE_INTERVAL;
-    require!(new_cycle || now <= a.vault.cycle_start + REBALANCE_WINDOW, FolioError::RebalanceTooSoon);
+    if !is_manager {
+        require!(new_cycle || now <= a.vault.cycle_start + REBALANCE_WINDOW, FolioError::RebalanceTooSoon);
+    }
 
     let held_len = a.vault.held.len() * 2;
     let holdings = load_holdings(&vault_key, &a.vault, ctx.remaining_accounts, 2)?;
@@ -147,7 +153,8 @@ pub fn handle_rebalance<'info>(
     require!(t_buy > 0, FolioError::BuyNotUnderweight);
     let sell_value = value_of(&prices, &settlement, &sell, a.sell_mint.decimals, sell_before, false)?;
     let buy_value = value_of(&prices, &settlement, &buy, a.buy_mint.decimals, buy_before, false)?;
-    require!(sell_value * 10_000 > (t_sell + DRIFT_BAND_BPS) * total, FolioError::SellNotOverweight);
+    let min_sell_bps = if is_manager { t_sell } else { t_sell + DRIFT_BAND_BPS };
+    require!(sell_value * 10_000 > min_sell_bps * total, FolioError::SellNotOverweight);
     require!(buy_value * 10_000 < t_buy * total, FolioError::BuyNotUnderweight);
 
     // The vault PDA signs for the router, exactly where the route lists the vault.

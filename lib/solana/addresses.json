@@ -37,7 +37,7 @@
     ]
   },
   "devnet": {
-    "registry": "4on5rPymYh1W7sLe6LA3WYwXBR2wgBG5KiqSrMucQHC1",
+    "registry": "5oXtrPVCKKBb5jXmwztbTvA8avvhiPDtXWQWtFUG8LZ9",
     "usdc": "DKg3JGudRDDWymeLhWVEjhfagNGi93SGYdRb7A8TuHdv",
     "faucet": "85xCXm8FssMF2zxgvMu7nZcq8fckWCJFmkWuv6Bxo2UR",
     "tokens": [
@@ -70,7 +70,7 @@
       }
     ],
     "vaults": [
-      "2cRhpsvAaLDE4e18rjrLczM1zBkwFMgZUU9mdNqWk4X9"
+      "67rk8UrKidmPj9ajLKbsX7qyHdgzhqxD9EGyUrgNUN39"
     ]
   }
 }

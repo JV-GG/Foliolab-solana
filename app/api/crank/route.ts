@@ -17,8 +17,9 @@ export async function GET(request: Request) {
   }
 
   try {
+    const force = url.searchParams.get('force') === 'true';
     const vault = await readVault(vaultParam);
-    const recommendation = evaluateRebalance(vault);
+    const recommendation = evaluateRebalance(vault, force);
     return Response.json({
       vault: vault.address,
       state: vault.state,

@@ -54,7 +54,21 @@ import {
 } from '../lib/solana/program';
 import type {Deployment, TokenInfo} from '../lib/solana/config';
 
-const CLUSTER = process.env.CLUSTER ?? 'devnet';
+const envFile = path.join(__dirname, '..', '.env.local');
+if (fs.existsSync(envFile)) {
+  for (const line of fs.readFileSync(envFile, 'utf8').split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq > 0) {
+      const key = trimmed.slice(0, eq).trim();
+      const val = trimmed.slice(eq + 1).trim();
+      if (!process.env[key]) process.env[key] = val;
+    }
+  }
+}
+
+const CLUSTER = process.env.CLUSTER ?? (process.env.NEXT_PUBLIC_SOLANA_CLUSTER ?? 'devnet');
 const RPC =
   process.env.SOLANA_RPC_URL ?? (CLUSTER === 'localnet' ? 'http://127.0.0.1:8899' : 'https://api.devnet.solana.com');
 const ADDRESSES = path.join(__dirname, '..', 'lib', 'solana', 'addresses.json');
@@ -73,7 +87,13 @@ function home(p: string) {
   return p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p;
 }
 
-function loadKeypair(file: string, createIfMissing = false): Keypair {
+function loadKeypair(file: string, envVar?: string, createIfMissing = false): Keypair {
+  if (envVar && process.env[envVar]) {
+    try {
+      const arr = JSON.parse(process.env[envVar]!.trim());
+      return Keypair.fromSecretKey(Uint8Array.from(arr));
+    } catch {}
+  }
   const f = home(file);
   if (!fs.existsSync(f)) {
     if (!createIfMissing) throw new Error(`Keypair not found: ${f}`);
@@ -87,9 +107,9 @@ function loadKeypair(file: string, createIfMissing = false): Keypair {
 
 const connection = new Connection(RPC, 'confirmed');
 const admin = loadKeypair(process.env.ADMIN_KEYPAIR ?? '~/.config/solana/id.json');
-const priceSigner = loadKeypair(process.env.PRICE_SIGNER_KEYPAIR ?? '~/folio-price-signer.json');
-const faucet = loadKeypair(process.env.FAUCET_KEYPAIR ?? '~/folio-faucet.json', true);
-const guardian = loadKeypair(process.env.GUARDIAN_KEYPAIR ?? '~/folio-guardian.json', true);
+const priceSigner = loadKeypair(process.env.PRICE_SIGNER_KEYPAIR ?? '~/folio-price-signer.json', 'PRICE_SIGNER_SECRET_KEY');
+const faucet = loadKeypair(process.env.FAUCET_KEYPAIR ?? '~/folio-faucet.json', 'FAUCET_SECRET_KEY', true);
+const guardian = loadKeypair(process.env.GUARDIAN_KEYPAIR ?? '~/folio-guardian.json', 'GUARDIAN_SECRET_KEY', true);
 const folio = folioProgram(connection);
 const router = routerProgram(connection);
 

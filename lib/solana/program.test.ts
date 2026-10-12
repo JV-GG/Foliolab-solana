@@ -4,7 +4,7 @@ import {PRICE_DOMAIN, priceMessage, registryPda, vaultPda} from './program';
 
 describe('vaultPda', () => {
   it('derives the deployed demo vault (index 0)', () => {
-    expect(vaultPda(0).toBase58()).toBe('2cRhpsvAaLDE4e18rjrLczM1zBkwFMgZUU9mdNqWk4X9');
+    expect(vaultPda(0).toBase58()).toBe('67rk8UrKidmPj9ajLKbsX7qyHdgzhqxD9EGyUrgNUN39');
   });
 });
 

@@ -5,7 +5,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-folio_vault = "9PY9RRXQuMtHXDyvWNL5ohFrsSux5SLrJhhdtuBgLUJH"
+folio_vault = "CgbMfovmjXQvmLRSSh5s4Qu1ZdD8DYk8jUwvUYuP4UmR"
 mock_router = "FeE32TVg1Yk4DVe4jS3SELK13dQsbbDUWyY4dYKmQhjm"
 
 [programs.localnet]
