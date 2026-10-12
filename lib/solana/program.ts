@@ -54,10 +54,21 @@ export function registryPda(): PublicKey {
   return PublicKey.findProgramAddressSync([Buffer.from('registry')], FOLIO_PROGRAM_ID)[0];
 }
 
+/** 8-byte little-endian integer. DataView, not Buffer: the browser's Buffer polyfill has no BigInt writers. */
+function le64(value: bigint | string | number | BN, signed = false): Uint8Array {
+  const out = new Uint8Array(8);
+  const view = new DataView(out.buffer);
+  const n = BigInt(value.toString());
+  if (signed) view.setBigInt64(0, n, true);
+  else view.setBigUint64(0, n, true);
+  return out;
+}
+
 export function vaultPda(index: number | bigint | BN, registry = registryPda()): PublicKey {
-  const bytes = Buffer.alloc(8);
-  bytes.writeBigUInt64LE(BigInt(index.toString()));
-  return PublicKey.findProgramAddressSync([Buffer.from('vault'), registry.toBuffer(), bytes], FOLIO_PROGRAM_ID)[0];
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('vault'), registry.toBuffer(), Buffer.from(le64(index))],
+    FOLIO_PROGRAM_ID,
+  )[0];
 }
 
 export function positionPda(vault: PublicKey, owner: PublicKey): PublicKey {
@@ -146,20 +157,20 @@ export function priceMessage(
 ): Uint8Array {
   if (update.mints.length !== update.prices.length) throw new Error('mints and prices differ in length');
   if (update.mints.length > 255) throw new Error('too many prices');
-  const out = Buffer.alloc(PRICE_DOMAIN.length + 32 + 8 + 1 + update.mints.length * 40);
+  const out = new Uint8Array(PRICE_DOMAIN.length + 32 + 8 + 1 + update.mints.length * 40);
   let o = 0;
   out.set(PRICE_DOMAIN, o);
   o += PRICE_DOMAIN.length;
-  out.set(registry.toBuffer(), o);
+  out.set(registry.toBytes(), o);
   o += 32;
-  out.writeBigInt64LE(BigInt(update.timestamp.toString()), o);
+  out.set(le64(update.timestamp, true), o);
   o += 8;
-  out.writeUInt8(update.mints.length, o);
+  out[o] = update.mints.length;
   o += 1;
   update.mints.forEach((mint, i) => {
-    out.set(new PublicKey(mint).toBuffer(), o);
+    out.set(new PublicKey(mint).toBytes(), o);
     o += 32;
-    out.writeBigUInt64LE(BigInt(update.prices[i].toString()), o);
+    out.set(le64(update.prices[i]), o);
     o += 8;
   });
   return out;
