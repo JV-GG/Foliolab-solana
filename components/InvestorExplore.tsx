@@ -12,13 +12,16 @@ import {AnimatedBrandFooter} from './AnimatedBrandFooter';
 import {StrategyCard} from './StrategyCard';
 
 type ExploreView = 'map' | 'list';
+type VaultScope = 'all' | 'positions';
 
 export function InvestorExplore() {
   const {address} = useConnection();
   const {data: vaults = [], isLoading, error, refetch, isFetching} = useVaults();
   const [view, setView] = useState<ExploreView>('map');
+  const [scope, setScope] = useState<VaultScope>('all');
   const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
-  const selected = vaults.find((vault) => vault.address === selectedAddress) ?? vaults[0] ?? null;
+  const visibleVaults = scope === 'positions' ? vaults.filter(hasPosition) : vaults;
+  const selected = visibleVaults.find((vault) => vault.address === selectedAddress) ?? visibleVaults[0] ?? null;
 
   return (
     <div className="min-h-[100dvh] bg-[#ebeee7]">
@@ -51,17 +54,39 @@ export function InvestorExplore() {
                 if (vaultAddress) setSelectedAddress(vaultAddress);
               }}
             >
-              <AssetMap vaults={vaults} selectedAddress={selected?.address ?? null} connectedAddress={address} onSelect={setSelectedAddress} />
+              <AssetMap
+                vaults={visibleVaults}
+                selectedAddress={selected?.address ?? null}
+                connectedAddress={address}
+                sizeByValue
+                toolbar={<VaultScopeFilter value={scope} onChange={setScope} />}
+                emptyTitle={scope === 'positions' ? address ? 'NO_POSITIONS' : 'CONNECT_WALLET' : undefined}
+                emptyDetail={scope === 'positions' ? address ? 'This wallet does not currently hold shares in any visible vault.' : 'Connect a wallet to show only islands where you currently hold vault shares.' : undefined}
+                onSelect={setSelectedAddress}
+              />
             </div>
             {selected && <SelectedVault vault={selected} />}
           </div>
-        ) : (
+        ) : scope === 'positions' && !address ? <Notice title="Connect your wallet" detail="Connect a wallet to show only vaults where you currently hold shares." /> : !visibleVaults.length ? <Notice title="No positions yet" detail="This wallet does not currently hold shares in any visible vault." /> : (
           <div className="mt-10 grid gap-x-10 lg:grid-cols-2">
-            {vaults.map((vault, index) => <StrategyCard key={vault.address} vault={vault} index={index} selected={vault.address === selected?.address} onSelect={() => setSelectedAddress(vault.address)} />)}
+            {visibleVaults.map((vault, index) => <StrategyCard key={vault.address} vault={vault} index={index} />)}
           </div>
         )}
       </main>
       <AnimatedBrandFooter />
+    </div>
+  );
+}
+
+function hasPosition(vault: VaultView) {
+  return vault.position !== null && BigInt(vault.position.shares) > BigInt(0);
+}
+
+function VaultScopeFilter({value, onChange}: {value: VaultScope; onChange: (scope: VaultScope) => void}) {
+  return (
+    <div role="group" aria-label="Vault scope" className="flex h-8 overflow-hidden border border-[#555b58] bg-[#111314]">
+      <button type="button" aria-pressed={value === 'all'} onClick={() => onChange('all')} className={`px-2.5 font-mono text-[7px] font-[800] tracking-[0.1em] sm:px-3 ${value === 'all' ? 'bg-[#21483f] text-[#8ff2dc]' : 'text-[#8f9692] hover:bg-[#1b1e1c] hover:text-white'}`}>All islands</button>
+      <button type="button" aria-pressed={value === 'positions'} onClick={() => onChange('positions')} className={`border-l border-[#555b58] px-2.5 font-mono text-[7px] font-[800] tracking-[0.1em] sm:px-3 ${value === 'positions' ? 'bg-[#21483f] text-[#8ff2dc]' : 'text-[#8f9692] hover:bg-[#1b1e1c] hover:text-white'}`}>My positions</button>
     </div>
   );
 }

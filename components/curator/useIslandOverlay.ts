@@ -304,7 +304,7 @@ function paintBoundaries(target: Uint8ClampedArray, land: number[], territoryAt:
 
 function markerPositions(land: number[], territoryAt: Int16Array, holders: MapHolder[], width: number): HolderMarker[] {
   return holders.flatMap((holder, holderIndex) => {
-    if (holder.kind !== 'wallet' || BigInt(holder.shares) <= BigInt(0)) return [];
+    if (BigInt(holder.shares) <= BigInt(0)) return [];
     const territory = land.filter((pixel) => territoryAt[pixel] === holderIndex);
     if (territory.length === 0) return [];
     const centerX = territory.reduce((sum, pixel) => sum + pixel % width, 0) / territory.length;
