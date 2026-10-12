@@ -263,31 +263,13 @@ export function PlanCard({vault, managerAllowed}: Props) {
           <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#59645c]">
             Target Asset Weights
           </label>
-          <div className="flex items-center gap-2">
-            <span
-              className={`font-mono text-[11px] font-semibold ${
-                validWeights ? 'text-[#237b68]' : 'text-[#6b746c]'
-              }`}
-            >
-              Total: {totalPercent}% / 100% {validWeights ? '✓' : `(${100 - totalPercent}% free)`}
-            </span>
-            {totalPercent < 100 && (
-              <button
-                type="button"
-                disabled={!managerAllowed || publishing || (isActive && !showProposeModal)}
-                onClick={() => {
-                  const remaining = 100 - totalPercent;
-                  const usdc = tokens.find((t) => t.symbol === 'USDC') ?? tokens[0];
-                  if (usdc) {
-                    setWeights((prev) => ({...prev, [usdc.mint]: (prev[usdc.mint] || 0) + remaining}));
-                  }
-                }}
-                className="font-mono text-[10px] font-bold text-[#237b68] underline hover:text-[#175245]"
-              >
-                + Auto Fill
-              </button>
-            )}
-          </div>
+          <span
+            className={`font-mono text-[11px] font-semibold ${
+              validWeights ? 'text-[#237b68]' : 'text-[#6b746c]'
+            }`}
+          >
+            Total: {totalPercent}% / 100% {validWeights ? '✓' : `(${100 - totalPercent}% free)`}
+          </span>
         </div>
 
         <div className="flex items-center justify-between text-[10px] text-[#717b72]">
