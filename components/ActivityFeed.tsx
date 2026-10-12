@@ -7,6 +7,7 @@ import {shortAddress} from '@/lib/domain/format';
 import {useHistory} from '@/lib/history/hooks';
 import type {ActivityItem, ActivityType} from '@/lib/history/types';
 import type {VaultView} from '@/lib/contracts/hooks';
+import {FolioSelect} from '@/components/FolioSelect';
 
 type FilterCategory = 'all' | 'mine' | 'withdraw' | 'deposit' | 'trades' | 'plans';
 
@@ -82,6 +83,18 @@ export function ActivityFeed({vaults, onSelectVault}: Props) {
     }
   }, [items, category, userAddress]);
 
+  const filterCounts = useMemo<Record<FilterCategory, number>>(() => {
+    const userLower = userAddress?.toLowerCase();
+    return {
+      all: items.length,
+      mine: userLower ? items.filter((item) => 'investor' in item && item.investor.toLowerCase() === userLower).length : 0,
+      deposit: items.filter((item) => item.type === 'deposit').length,
+      withdraw: items.filter((item) => item.type === 'redeem').length,
+      trades: items.filter((item) => item.type === 'rebalance').length,
+      plans: items.filter((item) => item.type === 'plan' || item.type === 'seed').length,
+    };
+  }, [items, userAddress]);
+
   async function handleCopy(txHash: string) {
     try {
       await navigator.clipboard.writeText(txHash);
@@ -93,75 +106,83 @@ export function ActivityFeed({vaults, onSelectVault}: Props) {
   }
 
   return (
-    <section className="border-t border-[#aeb8ad]">
-      <header className="flex flex-col gap-5 border-b border-[#cdd3ca] py-6 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <span className="eyebrow">Confirmed on-chain events</span>
-          <h2 className="font-editorial mt-2 text-[34px] font-medium tracking-[-0.04em]">Activity</h2>
-          <p className="mt-2 text-[11px] text-[#6b746c]">Quote previews never appear here.</p>
+    <section className="overflow-visible rounded-[26px] border border-[#b8c1b7] bg-[#f4f6f0]/75 shadow-[0_18px_50px_rgba(43,58,48,0.08)]">
+      <header className="grid gap-6 border-b border-[#cdd3ca] px-5 py-6 sm:px-7 md:grid-cols-[1fr_auto] md:items-end">
+        <div className="flex items-start gap-4">
+          <div aria-hidden="true" className="grid h-12 w-12 shrink-0 place-items-center rounded-[15px] border border-[#2b3a30] bg-[#2b3a30] font-mono text-[17px] font-[800] text-[#73e2ca] shadow-[4px_4px_0_#d8b126]">A</div>
+          <div>
+            <span className="eyebrow">Confirmed on-chain events</span>
+            <h2 className="font-editorial mt-1 text-[40px] font-medium leading-none tracking-[-0.045em]">Activity</h2>
+            <p className="mt-2 text-[11px] leading-5 text-[#6b746c]">A verified timeline of deposits, withdrawals and curator decisions.</p>
+          </div>
         </div>
-        <div className="flex min-w-0 items-center gap-2">
-          <select
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+          <FolioSelect
             value={selectedVault}
-            onChange={(event) => setSelectedVault(event.target.value)}
-            aria-label="Filter by vault"
-            className="folio-field min-w-0 flex-1 py-2 text-[11px] font-semibold sm:max-w-[240px]"
-          >
-            <option value="all">All vaults</option>
-            {vaults.map((vault) => (
-              <option key={vault.address} value={vault.address}>
-                {vault.name} ({vault.symbol})
-              </option>
-            ))}
-          </select>
+            onChange={setSelectedVault}
+            ariaLabel="Filter by vault"
+            options={[
+              {value: 'all', label: 'All vaults'},
+              ...vaults.map((vault) => ({value: vault.address, label: `${vault.name} (${vault.symbol})`})),
+            ]}
+            className="py-2 text-[12px] font-semibold"
+            containerClassName="min-w-0 flex-1 sm:w-[260px]"
+          />
           <button
             type="button"
             onClick={() => refetch()}
             disabled={isFetching}
             title="Refresh on-chain activity"
-            className="folio-button-secondary min-h-0 shrink-0 px-3 py-2 text-[10px]"
+            className="flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-[14px] border border-[#91a097] bg-[#fcfdf9] px-4 text-[10px] font-[800] tracking-[0.08em] text-[#405047] shadow-[0_2px_8px_rgba(43,58,48,0.06)] transition hover:border-[#2b3a30] hover:shadow-[0_7px_20px_rgba(43,58,48,0.12)] disabled:cursor-wait"
           >
             <span className={`h-2 w-2 rounded-full ${isFetching ? 'animate-pulse bg-[#d8b126]' : 'bg-[#237b68]'}`} />
-            LIVE
+            {isFetching ? 'SYNCING' : 'LIVE · REFRESH'}
           </button>
         </div>
       </header>
 
-      <div className="border-b border-[#cdd3ca] py-3">
-        <div className="folio-segmented flex max-w-full overflow-x-auto">
+      <div className="grid border-b border-[#cdd3ca] bg-[#e8ece5] sm:grid-cols-3">
+        <ActivityStat label="Confirmed events" value={String(items.length).padStart(2, '0')} />
+        <ActivityStat label="Currently showing" value={String(filteredItems.length).padStart(2, '0')} />
+        <ActivityStat label="Data policy" value="ON-CHAIN ONLY" last />
+      </div>
+
+      <div className="border-b border-[#cdd3ca] px-4 py-3 sm:px-6">
+        <div className="flex max-w-full flex-wrap gap-2">
           {filters.map((filter) => (
             <button
               key={filter.id}
               type="button"
               onClick={() => setCategory(filter.id)}
               data-active={category === filter.id}
-              className="folio-segment shrink-0"
+              className={`inline-flex min-h-9 shrink-0 items-center gap-2 rounded-full border px-3.5 text-[10px] font-[800] transition ${category === filter.id ? 'border-[#2b3a30] bg-[#2b3a30] text-white shadow-[0_4px_12px_rgba(43,58,48,0.16)]' : 'border-[#bdc6bc] bg-[#f8f9f5] text-[#647067] hover:border-[#657168] hover:text-[#2b3a30]'}`}
             >
               {filter.label}
+              <span className={`grid h-5 min-w-5 place-items-center rounded-full px-1 font-mono text-[8px] ${category === filter.id ? 'bg-[#73e2ca] text-[#20342d]' : 'bg-[#e2e6df] text-[#667168]'}`}>{filterCounts[filter.id]}</span>
             </button>
           ))}
         </div>
       </div>
 
-      <div>
+      <div className="p-3 sm:p-5">
         {category === 'mine' && !isConnected ? (
           <EmptyState title="Wallet not connected" detail="Connect your wallet to filter deposits and withdrawals made by that address." />
         ) : isLoading ? (
-          <div className="grid min-h-[210px] place-items-center border-b border-[#cdd3ca] text-center">
+          <div className="grid min-h-[210px] place-items-center rounded-[18px] border border-[#cdd3ca] bg-[#f8f9f5] text-center">
             <div>
               <span className="mx-auto block h-6 w-6 animate-spin rounded-full border-2 border-[#b9c1b8] border-t-[#2b3a30]" />
               <p className="mt-3 text-[11px] text-[#6b746c]">Reading confirmed events...</p>
             </div>
           </div>
         ) : error ? (
-          <div className="border-b border-[#b98282] py-6 text-[#8f3e3e]">
+          <div className="rounded-[18px] border border-[#c99292] bg-[#f8eeee] px-5 py-6 text-[#8f3e3e]">
             <p className="text-[12px] font-[800]">Activity could not be loaded</p>
             <p className="mt-1 break-words text-[10px] leading-5 text-[#a25a5a]">{error.message}</p>
           </div>
         ) : filteredItems.length === 0 ? (
           <EmptyState title="No confirmed transactions" detail={emptyDetail(category)} />
         ) : (
-          <div className="divide-y divide-[#cdd3ca]">
+          <div className="grid gap-3">
             {filteredItems.map((item) => (
               <ActivityRow
                 key={item.id}
@@ -178,9 +199,18 @@ export function ActivityFeed({vaults, onSelectVault}: Props) {
   );
 }
 
+function ActivityStat({label, value, last = false}: {label: string; value: string; last?: boolean}) {
+  return (
+    <div className={`flex items-center justify-between gap-4 border-b border-[#cdd3ca] px-5 py-3 sm:border-b-0 sm:px-6 ${last ? '' : 'sm:border-r'}`}>
+      <span className="text-[8px] font-[800] uppercase tracking-[0.14em] text-[#758078]">{label}</span>
+      <strong className="font-mono text-[11px] tracking-[0.06em] text-[#2b3a30]">{value}</strong>
+    </div>
+  );
+}
+
 function EmptyState({title, detail}: {title: string; detail: string}) {
   return (
-    <div className="grid min-h-[260px] place-items-center border-b border-dashed border-[#aeb8ad] px-6 text-center">
+    <div className="grid min-h-[260px] place-items-center rounded-[18px] border border-dashed border-[#aeb8ad] bg-[#f8f9f5] px-6 text-center">
       <div className="max-w-[430px]">
         <div className="font-editorial mx-auto text-[46px] text-[#879189]">0</div>
         <p className="font-editorial mt-3 text-[25px] font-medium text-[#2b3a30]">{title}</p>
@@ -220,45 +250,59 @@ function ActivityRow({
 }) {
 
   return (
-    <article className="flex flex-col gap-3 py-5 transition hover:bg-[#f7f8f3]/45 sm:flex-row sm:items-center sm:justify-between sm:gap-5 sm:px-2">
-      <div className="flex min-w-0 items-start gap-3">
+    <article className="group relative overflow-hidden rounded-[18px] border border-[#c4cbc2] bg-[#fcfdf9] p-4 shadow-[0_4px_16px_rgba(43,58,48,0.045)] transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-[#8d9990] hover:shadow-[0_12px_28px_rgba(43,58,48,0.11)] sm:p-5">
+      <div className="absolute inset-y-0 left-0 w-1 bg-[#d8b126] opacity-0 transition-opacity group-hover:opacity-100" />
+      <div className="flex min-w-0 items-start gap-4">
         <ActivityBadge type={item.type} />
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <button
-              type="button"
-              onClick={() => onSelectVault?.(item.vault)}
-              className="text-left text-[12px] font-bold text-[#2b3a30] hover:underline"
-            >
-              {item.vaultName}
-            </button>
-            <span className="rounded-full border border-[#b9c1b8] px-1.5 py-0.5 text-[8px] text-[#6b746c]">{item.vaultSymbol}</span>
-            <span className="text-[9px] text-[#788179]">{formatRealTime(item.timestamp)}</span>
-            <span className="text-[9px] text-[#8a938b]">{timeAgo(item.timestamp)}</span>
-          </div>
-          <div className="mt-1.5 text-[11px] leading-5 text-[#59645c]">{renderActivityContent(item)}</div>
-          <span className="mt-1.5 inline-block text-[8px] text-[#879088]">SLOT {item.blockNumber}</span>
-        </div>
-      </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSelectVault?.(item.vault)}
+                  className="font-editorial text-left text-[20px] font-medium leading-none tracking-[-0.025em] text-[#2b3a30] hover:underline"
+                >
+                  {item.vaultName}
+                </button>
+                <span className="rounded-full border border-[#b9c1b8] bg-[#f1f3ee] px-2 py-1 text-[8px] font-[800] tracking-[0.08em] text-[#6b746c]">{item.vaultSymbol}</span>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] text-[#788179]">
+                <span>{formatRealTime(item.timestamp)}</span>
+                <span className="font-[800] text-[#237b68]">{timeAgo(item.timestamp)}</span>
+                <span className="font-mono">SLOT {item.blockNumber}</span>
+              </div>
+            </div>
 
-      <div className="flex shrink-0 items-center gap-2 self-end sm:self-center">
-        <a
-          href={explorerUrl('tx', item.txHash)}
-          target="_blank"
-          rel="noopener noreferrer"
-          title="View on Solana Explorer"
-          className="text-[9px] text-[#59645c] hover:underline"
-        >
-          {shortAddress(item.txHash)} EXTERNAL
-        </a>
-        <button
-          type="button"
-          onClick={() => onCopy(item.txHash)}
-          title="Copy transaction hash"
-          className="rounded-full border border-[#b9c1b8] px-2 py-1 text-[9px] font-bold text-[#59645c] hover:border-[#2b3a30]"
-        >
-          {copied ? 'COPIED' : 'COPY'}
-        </button>
+            <div className="flex shrink-0 items-center gap-2 self-start">
+              <a
+                href={explorerUrl('tx', item.txHash)}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="View on Solana Explorer"
+                className="inline-flex min-h-8 items-center rounded-full border border-[#b9c1b8] bg-[#f7f8f3] px-3 text-[9px] font-[800] text-[#59645c] transition hover:border-[#2b3a30] hover:text-[#2b3a30]"
+              >
+                EXPLORER ↗
+              </a>
+              <button
+                type="button"
+                onClick={() => onCopy(item.txHash)}
+                title="Copy transaction hash"
+                className="inline-flex min-h-8 items-center rounded-full border border-[#b9c1b8] bg-[#f7f8f3] px-3 text-[9px] font-[800] text-[#59645c] transition hover:border-[#2b3a30] hover:text-[#2b3a30]"
+              >
+                {copied ? 'COPIED ✓' : 'COPY TX'}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 border-t border-[#e0e4dd] pt-3 text-[12px] leading-6 text-[#59645c]">{renderActivityContent(item)}</div>
+          <div className="mt-3 flex items-center gap-2 font-mono text-[8px] text-[#879088]">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#237b68]" />
+            <span>CONFIRMED</span>
+            <span>·</span>
+            <span>{shortAddress(item.txHash)}</span>
+          </div>
+        </div>
       </div>
     </article>
   );
@@ -273,7 +317,7 @@ function ActivityBadge({type}: {type: ActivityType}) {
     seed: {label: 'SEED', className: 'border-[#a8ac77] bg-[#edefdc] text-[#68702e]'},
   };
   const style = styles[type];
-  return <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-md border font-mono text-[7px] font-[900] ${style.className}`}>{style.label}</span>;
+  return <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-[13px] border font-mono text-[8px] font-[900] shadow-[0_3px_10px_rgba(43,58,48,0.08)] ${style.className}`}>{style.label}</span>;
 }
 
 function renderActivityContent(item: ActivityItem) {

@@ -65,7 +65,7 @@ export function TradeDialog({type, vault, onClose}: Props) {
     }
   }, [type, reset]);
 
-  // Withdrawal preview: simulate the redemption so the investor sees exactly what arrives.
+  // Withdrawal preview: the investor's exact share of each holding, computed like the program does.
   useEffect(() => {
     if (!previewKey) return;
     let live = true;
@@ -188,14 +188,13 @@ export function TradeDialog({type, vault, onClose}: Props) {
                 })
               ) : previewError ? (
                 <p className="text-[12px] text-[#a14343]">
-                  {previewError} One of the vault&apos;s tokens may be paused by its issuer. Leave it behind below
-                  to withdraw everything else.
+                  {previewError}
                 </p>
               ) : (
                 <p className="text-[12px] text-[#6b746c]">Calculating…</p>
               )}
             </div>
-            {showForfeit || previewError ? (
+            {showForfeit ? (
               <fieldset className="mb-4 rounded-2xl border border-[#b9c1b8] p-[14px]">
                 <legend className="px-1 text-[12px] font-semibold text-[#3d4a41]">Leave tokens behind</legend>
                 <p className="mb-2 text-[11px] leading-[1.5] text-[#6b746c]">

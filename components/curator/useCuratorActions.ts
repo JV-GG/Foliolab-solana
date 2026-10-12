@@ -378,6 +378,33 @@ export function useCuratorActions() {
       onStage?.('simulating');
 
       try {
+        // 1-Click autonomous keeper execution: trades entire cycle on-chain without repeated wallet prompts
+        try {
+          const crankRes = await fetch('/api/crank', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({vault: vault.address, force: true}),
+          });
+          const crankData = await crankRes.json().catch(() => ({}));
+          if (crankRes.ok && crankData.ok) {
+            onStage?.('confirmed');
+            await refresh();
+            return {
+              hash: crankData.trades?.[0]?.signature || '',
+              simulatedSold: BigInt(crankData.trades?.[0]?.sellAmount || '0'),
+              simulatedBought: BigInt(0),
+              trades: crankData.trades || [],
+            };
+          } else if (crankData.error && (crankData.error.includes('within target weights') || crankData.error.includes('already balanced'))) {
+            throw new Error('All assets are already balanced at their target weights.');
+          }
+        } catch (crankErr: any) {
+          if (crankErr.message && (crankErr.message.includes('within target weights') || crankErr.message.includes('already balanced'))) {
+            throw crankErr;
+          }
+          console.warn('Autonomous keeper fallback to wallet:', crankErr);
+        }
+
         const vaultPubkey = new PublicKey(vault.address);
         const program = folioProgram(connection);
         const instructionSets: TransactionInstruction[][] = [];

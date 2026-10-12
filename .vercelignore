@@ -1,0 +1,6 @@
+.env*
+!.env.example
+anchor/target
+anchor/.anchor
+.next
+node_modules

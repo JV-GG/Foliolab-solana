@@ -10,7 +10,7 @@ import {formatUnits} from '@/lib/domain/format';
 import {resolveToken} from './tokenMetadata';
 import type {ActivityItem, HistoryResponse} from './types';
 
-const SIGNATURES_PER_VAULT = 15;
+const SIGNATURES_PER_VAULT = 20;
 const CHUNK_SIZE = 4;
 
 // Cache parsed activities by transaction signature to avoid re-querying immutable history

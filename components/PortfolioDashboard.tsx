@@ -19,7 +19,7 @@ export function PortfolioDashboard() {
   return (
     <div className="min-h-[100dvh] bg-[#ebeee7]">
       <Header />
-      <main className="site-container pb-8 pt-16 sm:pt-24">
+      <main className="site-container pb-8 pt-10 sm:pt-12">
         <div className="grid gap-8 border-b border-[#aeb8ad] pb-10 md:grid-cols-[1fr_auto] md:items-end">
           <div><p className="eyebrow">Your holdings</p><h1 className="page-title mt-5">A portfolio of<br />portfolios.</h1></div>
           <div className="folio-segmented inline-flex"><button type="button" className="folio-segment" data-active={view === 'positions'} onClick={() => setView('positions')}>Positions</button><button type="button" className="folio-segment" data-active={view === 'activity'} onClick={() => setView('activity')}>Activity</button></div>

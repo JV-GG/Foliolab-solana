@@ -64,6 +64,25 @@ async function extractTxError(
   throw err;
 }
 
+/**
+ * Polls signature status instead of relying purely on websockets: the public devnet RPC
+ * rate-limits websockets (HTTP 429), and a dropped subscription leaves the UI waiting.
+ */
+async function waitForConfirmation(connection: Connection, signature: string, lastValidBlockHeight: number) {
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    const {value} = await connection.getSignatureStatuses([signature]).catch(() => ({value: [null]}));
+    const status = value[0];
+    if (status?.err) throw new Error(`The transaction failed on-chain: ${JSON.stringify(status.err)}`);
+    if (status && (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')) return;
+    if (attempt % 10 === 9) {
+      const height = await connection.getBlockHeight('confirmed').catch(() => 0);
+      if (height > lastValidBlockHeight) throw new Error('The transaction expired before it landed. Try again.');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+  }
+  throw new Error(`Still waiting for confirmation. Check it on Solana Explorer: ${signature}`);
+}
+
 /** The connected wallet, in the shape the components already use. */
 export function useConnection(): {address: string | undefined; isConnected: boolean} {
   const {publicKey, connected} = useWallet();
@@ -129,11 +148,8 @@ export function useSendTransaction() {
       } catch (err: any) {
         await extractTxError(err, tx, connection);
       }
-      const result = await connection.confirmTransaction(
-        {signature: signature!, blockhash, lastValidBlockHeight},
-        'confirmed',
-      );
-      if (result.value.err) throw new Error(`The transaction failed on-chain: ${JSON.stringify(result.value.err)}`);
+      const validUntil = (tx instanceof Transaction ? tx.lastValidBlockHeight : null) ?? lastValidBlockHeight;
+      await waitForConfirmation(connection, signature!, validUntil);
       return signature!;
     },
     [connection, publicKey, sendTransaction],
@@ -195,7 +211,7 @@ export function useSendMultipleTransactions() {
           } catch (err: any) {
             await extractTxError(err, signedTx, connection);
           }
-          await connection.confirmTransaction({signature: sig!, blockhash, lastValidBlockHeight}, 'confirmed');
+          await waitForConfirmation(connection, sig!, lastValidBlockHeight);
           signatures.push(sig!);
         }
       } else {
@@ -207,7 +223,8 @@ export function useSendMultipleTransactions() {
           } catch (err: any) {
             await extractTxError(err, tx, connection);
           }
-          await connection.confirmTransaction({signature: sig!, blockhash, lastValidBlockHeight}, 'confirmed');
+          const validUntil = (tx instanceof Transaction ? tx.lastValidBlockHeight : null) ?? lastValidBlockHeight;
+          await waitForConfirmation(connection, sig!, validUntil);
           signatures.push(sig!);
         }
       }

@@ -19,6 +19,7 @@ import {useIslandOverlay, type MapHolder, type OverlayAsset} from './useIslandOv
 
 const DESKTOP_VIEW_WIDTH = 1080;
 const ART_SIZE = 430;
+const MIN_VALUE_ART_SIZE = 270;
 const SAMPLE_SIZE = 500;
 const MAX_COLUMNS = 2;
 const ART_VARIANTS = [
@@ -40,6 +41,10 @@ interface Props {
   connectedAddress?: string;
   artSample?: boolean;
   demo?: boolean;
+  sizeByValue?: boolean;
+  toolbar?: React.ReactNode;
+  emptyTitle?: string;
+  emptyDetail?: string;
   holdersByVault?: Record<string, MapHolder[]>;
   onSelect: (address: string) => void;
 }
@@ -78,6 +83,10 @@ export function AssetMap({
   connectedAddress,
   artSample = false,
   demo = false,
+  sizeByValue = false,
+  toolbar,
+  emptyTitle,
+  emptyDetail,
   holdersByVault,
   onSelect,
 }: Props) {
@@ -101,6 +110,8 @@ export function AssetMap({
     : compact
       ? Math.max(560, 30 + rows * 480)
       : Math.max(620, 50 + rows * 480);
+  const detailScale = singleIsland ? 1 : Math.min(1.9, 1 + Math.max(0, rows - 1) * 0.45);
+  const maxVaultValue = Math.max(0, ...visibleVaults.map(vaultValue));
   const selectedVault = visibleVaults.find((vault) => vault.address === selectedAddress) ?? visibleVaults[0] ?? null;
 
   function resetView() {
@@ -143,12 +154,12 @@ export function AssetMap({
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#090a0b] font-mono text-[#e8e9e5]">
-      <div className="relative z-30 flex min-h-[58px] flex-wrap items-center gap-2 border-b border-[#3b3f41] bg-[#0b0c0d]/98 px-3 py-2 sm:px-4">
-        <div className="mr-auto w-full min-w-0 sm:w-auto sm:min-w-[155px]">
-          <div className="flex items-center gap-2">
+      <div className="relative z-30 flex min-h-[58px] flex-wrap items-center gap-2 border-b border-[#3b3f41] bg-[#0b0c0d]/98 px-3 py-2 sm:px-4 lg:grid lg:grid-cols-[minmax(360px,1fr)_auto_auto] lg:grid-rows-[auto_auto] lg:items-center lg:gap-x-3 lg:gap-y-2">
+        <div className="mr-auto w-full min-w-0 sm:w-auto sm:min-w-[155px] lg:col-start-1 lg:row-start-1 lg:mr-0">
+          <div className="flex flex-nowrap items-center gap-2">
             <span aria-hidden="true" className="text-[12px] text-[#65e2c5]">&gt;</span>
-            <h2 className="text-[13px] font-[800] tracking-[0.08em] text-[#f4f4ef] sm:text-[15px]">CAPITAL_ARCHIPELAGO</h2>
-            <span className="border border-[#4a504e] bg-[#171a19] px-2 py-1 text-[7px] font-[800] tracking-[0.12em] text-[#65e2c5]">
+            <h2 className="shrink-0 whitespace-nowrap text-[13px] font-[800] tracking-[0.08em] text-[#f4f4ef] sm:text-[15px]">CAPITAL_ARCHIPELAGO</h2>
+            <span className="shrink-0 whitespace-nowrap border border-[#4a504e] bg-[#171a19] px-2 py-1 text-[7px] font-[800] tracking-[0.12em] text-[#65e2c5]">
               [ {demo ? 'VISUAL_DEMO' : artSample ? 'ART_SAMPLE' : 'VAULT_ISLANDS'} ]
             </span>
           </div>
@@ -157,22 +168,27 @@ export function AssetMap({
           </p>
         </div>
 
-        <MapViewToggle value={mapView} onChange={(value) => {
-          setMapView(value);
-          if (value === 'terrain') setHoveredAsset(null);
-        }} />
-        <LayerToggle active={showTerritories} label="User territories" shortLabel="USERS" onClick={() => setShowTerritories((value) => !value)} />
-        <div className="ml-1 flex items-center gap-1.5 border-l border-[#3b3f41] pl-2">
-          <MapButton label="Zoom out" disabled={zoom <= 0.75} onClick={() => setZoom((value) => Math.max(0.75, value - 0.25))}>−</MapButton>
-          <span className="w-9 text-center font-mono text-[8px] text-[#91a2b8]">{Math.round(zoom * 100)}%</span>
+        {toolbar && <div className="lg:col-start-2 lg:row-start-2">{toolbar}</div>}
+        <div className="lg:col-span-2 lg:col-start-2 lg:row-start-1 lg:justify-self-end">
+          <MapViewToggle value={mapView} onChange={(value) => {
+            setMapView(value);
+            if (value === 'terrain') setHoveredAsset(null);
+          }} />
+        </div>
+        <div className="lg:col-start-3 lg:row-start-2 lg:justify-self-end">
+          <LayerToggle active={showTerritories} label="User territories" shortLabel="USERS" onClick={() => setShowTerritories((value) => !value)} />
+        </div>
+        <div className="ml-1 flex items-center gap-1.5 border-l border-[#3b3f41] pl-2 lg:col-start-1 lg:row-start-2 lg:ml-0 lg:border-l-0 lg:pl-0">
+          <MapButton label="Zoom out" disabled={zoom <= 0.25} onClick={() => setZoom((value) => Math.max(0.25, value - 0.25))}>−</MapButton>
+          <span className="w-12 text-center font-mono text-[13px] font-[800] text-[#a9bdd7] sm:text-[15px]">{Math.round(zoom * 100)}%</span>
           <MapButton label="Zoom in" disabled={zoom >= 1.75} onClick={() => setZoom((value) => Math.min(1.75, value + 0.25))}>+</MapButton>
-          <button type="button" onClick={resetView} className="h-8 border border-[#555b58] bg-[#111314] px-2 text-[7px] font-[800] tracking-[0.12em] text-[#c2c6c3] hover:border-[#8c9490] hover:bg-[#1a1d1c] hover:text-white">[ RESET ]</button>
+          <button type="button" onClick={resetView} className="h-10 border border-[#555b58] bg-[#111314] px-4 text-[13px] font-[800] tracking-[0.12em] text-[#c2c6c3] hover:border-[#8c9490] hover:bg-[#1a1d1c] hover:text-white sm:text-[15px]">[ RESET ]</button>
         </div>
       </div>
 
       <div className="relative min-h-0 flex-1 overflow-hidden bg-[#0d0f10]">
         {visibleVaults.length === 0 ? (
-          <EmptyMap />
+          <EmptyMap title={emptyTitle} detail={emptyDetail} />
         ) : (
           <svg
             viewBox={`0 0 ${viewWidth} ${viewHeight}`}
@@ -215,9 +231,14 @@ export function AssetMap({
             <g transform={`translate(${pan.x} ${pan.y}) scale(${zoom})`}>
               {visibleVaults.map((vault, index) => {
                 const slotWidth = viewWidth / columns;
-                const size = singleIsland ? SAMPLE_SIZE : ART_SIZE;
+                const size = singleIsland
+                  ? SAMPLE_SIZE
+                  : sizeByValue
+                    ? valueScaledIslandSize(vault, maxVaultValue)
+                    : ART_SIZE;
                 const x = index % columns * slotWidth + (slotWidth - size) / 2;
-                const y = (singleIsland ? 15 : 25) + Math.floor(index / columns) * 480;
+                const rowTop = (singleIsland ? 15 : 25) + Math.floor(index / columns) * 480;
+                const y = rowTop + (singleIsland ? 0 : ART_SIZE - size);
                 const variant = singleIsland ? ART_VARIANTS[0] : ART_VARIANTS[hashString(vault.address.toLowerCase()) % ART_VARIANTS.length];
                 return (
                   <ArtVaultIsland
@@ -234,7 +255,7 @@ export function AssetMap({
                     showAssets={mapView === 'distribution'}
                     showTerritories={showTerritories}
                     hoveredAssetAddress={hoveredAsset?.address ?? null}
-                    zoom={zoom}
+                    detailScale={detailScale}
                     onSelect={() => selectVault(vault.address)}
                     onTerritory={(holder) => {
                       selectVault(vault.address);
@@ -258,7 +279,7 @@ export function AssetMap({
         {hoveredAsset && mapView === 'distribution' && <AssetHoverCard asset={hoveredAsset} />}
       </div>
 
-      <MapLegend vault={selectedVault} mapView={mapView} showTerritories={showTerritories} demo={demo} />
+      <MapLegend vault={selectedVault} mapView={mapView} showTerritories={showTerritories} demo={demo} sizeByValue={sizeByValue} />
     </div>
   );
 }
@@ -276,7 +297,7 @@ function ArtVaultIsland({
   showAssets,
   showTerritories,
   hoveredAssetAddress,
-  zoom,
+  detailScale,
   onSelect,
   onTerritory,
   onAssetHover,
@@ -293,7 +314,7 @@ function ArtVaultIsland({
   showAssets: boolean;
   showTerritories: boolean;
   hoveredAssetAddress: string | null;
-  zoom: number;
+  detailScale: number;
   onSelect: () => void;
   onTerritory: (holder: MapHolder) => void;
   onAssetHover: (asset: HoveredAsset | null) => void;
@@ -403,7 +424,7 @@ function ArtVaultIsland({
         return (
           <g
             key={holder.id}
-            transform={`translate(${x + marker.x * size} ${y + marker.y * size}) scale(${1 / zoom})`}
+            transform={`translate(${x + marker.x * size} ${y + marker.y * size}) scale(${detailScale})`}
             role="button"
             tabIndex={0}
             aria-label={`Open territory details for ${holder.label}`}
@@ -416,12 +437,15 @@ function ArtVaultIsland({
               if (event.key === 'Enter' || event.key === ' ') onTerritory(holder);
             }}
           >
-            <InvestorMarker current={holder.current} label={holder.current ? 'YOU' : holder.label} />
+            <InvestorMarker
+              current={holder.current}
+              label={holder.kind === 'residual' ? 'OTHERS' : holder.current ? 'YOU' : holder.label}
+            />
           </g>
         );
       })}
 
-      <g transform={`translate(${x + size / 2} ${y + size - 13}) scale(${1 / zoom})`} data-map-control="label" pointerEvents="none">
+      <g transform={`translate(${x + size / 2} ${y + size - 13}) scale(${detailScale})`} data-map-control="label" pointerEvents="none">
         <rect x="-105" y="0" width="210" height={labelHeight} rx="0" fill="#090a0b" fillOpacity="0.98" stroke={selected ? '#f1c75b' : '#5d6360'} strokeWidth={selected ? 1.4 : 1} />
         <text x="0" y="17" textAnchor="middle" fill="#f2f3ef" fontSize="10" fontFamily="ui-monospace, monospace" fontWeight="800">[ {truncate(vault.name.toUpperCase(), 22)} ]</text>
         <text x="0" y="33" textAnchor="middle" fill={stateColor(vault.state)} fontSize="8" fontFamily="ui-monospace, monospace">{vault.state} · {vault.totalValueUsd === null ? 'VALUATION UNAVAILABLE' : `$${Number(vault.totalValueUsd).toLocaleString('en-US', {maximumFractionDigits: 0})}`}</text>
@@ -463,7 +487,7 @@ function AssetHoverCard({asset}: {asset: HoveredAsset}) {
   );
 }
 
-function MapLegend({vault, mapView, showTerritories, demo}: {vault: VaultView | null; mapView: MapView; showTerritories: boolean; demo: boolean}) {
+function MapLegend({vault, mapView, showTerritories, demo, sizeByValue}: {vault: VaultView | null; mapView: MapView; showTerritories: boolean; demo: boolean; sizeByValue: boolean}) {
   const mix = useMemo(() => assetMix(vault?.holdings ?? []), [vault?.holdings]);
   const total = mix.assets.reduce((sum, asset) => sum + asset.value, 0);
   return (
@@ -479,9 +503,20 @@ function MapLegend({vault, mapView, showTerritories, demo}: {vault: VaultView | 
       {mix.status === 'ready' && <span className="text-[#6f849c]">{mapView === 'distribution' ? 'Asset distribution view' : 'Natural terrain view'}</span>}
       {showTerritories && <span className="inline-flex items-center gap-1.5"><span className="w-5 border-t border-dashed border-[#deebda]" /> Dashed = wallet share territory</span>}
       {!showTerritories && <span>User territories hidden</span>}
-      <span className="ml-auto">{demo ? 'Static visual demo · no transactions' : 'Island size and terrain are decorative · not TVL or yield'}</span>
+      <span className="ml-auto">{demo ? 'Static visual demo · no transactions' : sizeByValue ? 'Island area follows vault value · minimum display size applied' : 'Island size and terrain are decorative · not TVL or yield'}</span>
     </div>
   );
+}
+
+function vaultValue(vault: VaultView) {
+  if (vault.totalValueUsd === null) return 0;
+  const value = Number(vault.totalValueUsd);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function valueScaledIslandSize(vault: VaultView, maxValue: number) {
+  if (maxValue <= 0) return ART_SIZE;
+  return Math.round(Math.max(MIN_VALUE_ART_SIZE, ART_SIZE * Math.sqrt(vaultValue(vault) / maxValue)));
 }
 
 function realHolders(vault: VaultView, connectedAddress?: string): MapHolder[] {
@@ -540,12 +575,12 @@ function InvestorMarker({current, label}: {current: boolean; label: string}) {
 
 function MapViewToggle({value, onChange}: {value: MapView; onChange: (value: MapView) => void}) {
   return (
-    <div role="group" aria-label="Map view" className="flex h-8 overflow-hidden border border-[#555b58] bg-[#111314]">
+    <div role="group" aria-label="Map view" className="flex h-10 overflow-hidden border border-[#555b58] bg-[#111314]">
       <button
         type="button"
         aria-pressed={value === 'terrain'}
         onClick={() => onChange('terrain')}
-        className={`px-2 font-mono text-[7px] font-[800] tracking-[0.1em] sm:px-2.5 ${value === 'terrain' ? 'bg-[#e4e6e2] text-[#0b0c0d]' : 'text-[#8f9692] hover:bg-[#1b1e1c] hover:text-white'}`}
+        className={`whitespace-nowrap px-4 font-mono text-[13px] font-[800] tracking-[0.12em] sm:text-[15px] ${value === 'terrain' ? 'bg-[#e4e6e2] text-[#0b0c0d]' : 'text-[#8f9692] hover:bg-[#1b1e1c] hover:text-white'}`}
       >
         <span className="sm:hidden">NATURE</span><span className="hidden sm:inline">Natural terrain</span>
       </button>
@@ -553,7 +588,7 @@ function MapViewToggle({value, onChange}: {value: MapView; onChange: (value: Map
         type="button"
         aria-pressed={value === 'distribution'}
         onClick={() => onChange('distribution')}
-        className={`border-l border-[#555b58] px-2 font-mono text-[7px] font-[800] tracking-[0.1em] sm:px-2.5 ${value === 'distribution' ? 'bg-[#21483f] text-[#8ff2dc]' : 'text-[#8f9692] hover:bg-[#1b1e1c] hover:text-white'}`}
+        className={`whitespace-nowrap border-l border-[#555b58] px-4 font-mono text-[13px] font-[800] tracking-[0.12em] sm:text-[15px] ${value === 'distribution' ? 'bg-[#21483f] text-[#8ff2dc]' : 'text-[#8f9692] hover:bg-[#1b1e1c] hover:text-white'}`}
       >
         <span className="sm:hidden">ASSETS</span><span className="hidden sm:inline">Asset distribution</span>
       </button>
@@ -568,20 +603,20 @@ function LayerToggle({active, label, shortLabel, onClick}: {active: boolean; lab
       aria-pressed={active}
       title={label}
       onClick={onClick}
-      className={`h-8 border px-2 font-mono text-[7px] font-[800] tracking-[0.1em] transition sm:px-2.5 ${active ? 'border-[#5ecbb5] bg-[#17372f] text-[#8ff2dc]' : 'border-[#555b58] bg-[#111314] text-[#858c88]'}`}
+      className={`h-10 whitespace-nowrap border px-4 font-mono text-[13px] font-[800] tracking-[0.12em] transition sm:text-[15px] ${active ? 'border-[#5ecbb5] bg-[#17372f] text-[#8ff2dc]' : 'border-[#555b58] bg-[#111314] text-[#858c88]'}`}
     >
       <span className="sm:hidden">{shortLabel}</span><span className="hidden sm:inline">{label}</span>
     </button>
   );
 }
 
-function EmptyMap() {
+function EmptyMap({title = 'NO_VAULTS_MAPPED', detail = 'CONNECT MANAGER WALLET OR CREATE THE FIRST VAULT. DECORATIVE ISLANDS ARE NEVER INSERTED.'}: {title?: string; detail?: string}) {
   return (
     <div className="absolute inset-0 grid place-items-center p-8 text-center">
       <div>
         <pre aria-hidden="true" className="text-[12px] leading-4 text-[#727a76]">{'   /\\\n _/  \\_\n/______\\'}</pre>
-        <p className="mt-5 text-[13px] font-[800] tracking-[0.08em] text-[#e0e3df]">[ NO_VAULTS_MAPPED ]</p>
-        <p className="mt-2 max-w-[360px] text-[11px] leading-[1.6] text-[#858c88]">CONNECT MANAGER WALLET OR CREATE THE FIRST VAULT. DECORATIVE ISLANDS ARE NEVER INSERTED.</p>
+        <p className="mt-5 text-[13px] font-[800] tracking-[0.08em] text-[#e0e3df]">[ {title} ]</p>
+        <p className="mt-2 max-w-[360px] text-[11px] leading-[1.6] text-[#858c88]">{detail}</p>
       </div>
     </div>
   );
@@ -606,7 +641,7 @@ function OceanTexture({width, height}: {width: number; height: number}) {
 }
 
 function MapButton({label, disabled, onClick, children}: {label: string; disabled: boolean; onClick: () => void; children: React.ReactNode}) {
-  return <button type="button" aria-label={label} disabled={disabled} onClick={onClick} className="grid h-8 w-8 place-items-center border border-[#555b58] bg-[#111314] text-[15px] text-[#d1d4d0] hover:border-[#8c9490] hover:bg-[#1a1d1c] hover:text-white disabled:cursor-not-allowed disabled:opacity-35">{children}</button>;
+  return <button type="button" aria-label={label} disabled={disabled} onClick={onClick} className="grid h-10 w-10 place-items-center border border-[#555b58] bg-[#111314] text-[15px] text-[#d1d4d0] hover:border-[#8c9490] hover:bg-[#1a1d1c] hover:text-white disabled:cursor-not-allowed disabled:opacity-35">{children}</button>;
 }
 
 function formatPercent(value: number) {

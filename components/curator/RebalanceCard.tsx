@@ -3,6 +3,7 @@
 import {useEffect, useMemo, useState} from 'react';
 import {formatUnits, parseUnits} from '@/lib/domain/format';
 import {useNotify} from '@/components/Toast';
+import {FolioSelect} from '@/components/FolioSelect';
 import {explainError, type VaultView} from '@/lib/contracts/hooks';
 import {tokenAmount} from '@/lib/domain/format';
 import {CuratorModal} from './CuratorModal';
@@ -261,33 +262,33 @@ export function RebalanceCard({vault, managerAllowed}: Props) {
       <div className="mt-4 grid gap-3">
         <div className="grid grid-cols-2 gap-2">
           <Field label="Sell">
-            <select
+            <FolioSelect
               value={sell}
-              onChange={(event) => changeSell(event.target.value as string)}
+              onChange={changeSell}
+              ariaLabel="Sell asset"
               disabled={!canQuote || quoting || executing}
-              className={inputClass}
-            >
-              {sellable.map((holding) => (
-                <option key={holding.asset} value={holding.asset}>
-                  {tokenSymbol(holding.asset, holding.symbol)} · {tokenAmount(holding.amount, holding.decimals, 3)}
-                </option>
-              ))}
-            </select>
+              className="text-[12px] font-medium"
+              options={sellable.map((holding) => ({
+                value: holding.asset,
+                label: `${tokenSymbol(holding.asset, holding.symbol)} · ${tokenAmount(holding.amount, holding.decimals, 3)}`,
+              }))}
+            />
           </Field>
           <Field label="Buy">
-            <select
+            <FolioSelect
               value={buy}
-              onChange={(event) => {
-                setBuy(event.target.value as string);
+              onChange={(value) => {
+                setBuy(value);
                 clearPreparedTrade();
               }}
+              ariaLabel="Buy asset"
               disabled={!canQuote || quoting || executing}
-              className={inputClass}
-            >
-              {assets.filter((asset) => asset.address !== sell).map((asset) => (
-                <option key={asset.address} value={asset.address}>{tokenSymbol(asset.address, asset.symbol)}</option>
-              ))}
-            </select>
+              className="text-[12px] font-medium"
+              options={assets.filter((asset) => asset.address !== sell).map((asset) => ({
+                value: asset.address,
+                label: tokenSymbol(asset.address, asset.symbol),
+              }))}
+            />
           </Field>
         </div>
         <Field label="Amount to sell">

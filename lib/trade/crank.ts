@@ -53,7 +53,7 @@ export function evaluateRebalance(
   if (vault.state !== 'ACTIVE') {
     return {eligible: false, reason: `Vault is ${vault.state}, not ACTIVE`};
   }
-  const targets = (customTargets && customTargets.length > 0) ? customTargets : vault.targets;
+  const targets = (customTargets && customTargets.length > 0) ? customTargets : (vault.onChainTargets ?? vault.targets);
   if (!targets || targets.length === 0) {
     return {eligible: false, reason: 'No target weights configured'};
   }

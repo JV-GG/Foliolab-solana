@@ -28,7 +28,7 @@ export function useHistory(options?: {
       return data.items;
     },
     enabled,
-    refetchInterval: 10_000,
+    refetchInterval: 6_000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   });
