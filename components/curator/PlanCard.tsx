@@ -29,6 +29,11 @@ export function PlanCard({vault, managerAllowed}: Props) {
     }
   }, [onChainTokens]);
 
+  const isClosedLocally =
+    typeof window !== 'undefined' &&
+    Boolean(localStorage.getItem(`folio_closed_proposal_${vault.address}`));
+  const activeProposal = vault.openProposal && !isClosedLocally ? vault.openProposal : null;
+
   // Initialize target weights from vault.targets or stored curator choices
   const initialWeights = useMemo(() => {
     const map: Record<string, number> = {};
@@ -395,14 +400,14 @@ export function PlanCard({vault, managerAllowed}: Props) {
       )}
 
       {/* Active Proposal Status Notice */}
-      {vault.openProposal && (
+      {activeProposal && (
         <div className="rounded-xl border border-[#c2b280] bg-[#fdfbf4] p-3 text-xs leading-relaxed text-[#7a6b32]">
           <div className="flex items-center justify-between font-semibold">
-            <span>Active Governance Proposal #{vault.openProposal.id}</span>
-            <span className="font-mono text-[10px] uppercase">{vault.openProposal.status}</span>
+            <span>Active Governance Proposal #{activeProposal.id}</span>
+            <span className="font-mono text-[10px] uppercase">{activeProposal.status}</span>
           </div>
           <p className="mt-1 text-[11px] text-[#6b746c]">
-            Bond attached: {formatSol(vault.openProposal.bondLamports)}. Performing rebalance will immediately refund this bond to your wallet and close the voting panel.
+            Bond attached: {formatSol(activeProposal.bondLamports)}. Performing rebalance will immediately refund this bond to your wallet and close the voting panel.
           </p>
           <button
             type="button"

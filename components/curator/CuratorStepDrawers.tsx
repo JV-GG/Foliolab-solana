@@ -1,10 +1,11 @@
 'use client';
 
-import {useState, useMemo} from 'react';
+import {useState, useMemo, useEffect} from 'react';
 import {useRouter} from 'next/navigation';
+import {useQueryClient} from '@tanstack/react-query';
 import {PublicKey} from '@solana/web3.js';
 import {useNotify} from '@/components/Toast';
-import {explainError, useOnChainTokens, type VaultView} from '@/lib/contracts/hooks';
+import {explainError, useOnChainTokens, VAULTS_KEY, type VaultView} from '@/lib/contracts/hooks';
 import {deployment, explorerUrl} from '@/lib/solana/config';
 import {formatSol, tokenAmount} from '@/lib/domain/format';
 import {MAX_PLAN_BYTES, utf8ByteLength} from './model';
@@ -36,8 +37,23 @@ function formatShare(parts: bigint | null) {
 
 export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: Props) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const notify = useNotify();
   const {action, setStrategy, proposeStrategy, fundGas, forceRebalance} = useCuratorActions();
+
+  const [isProposalClosedLocally, setIsProposalClosedLocally] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return Boolean(localStorage.getItem(`folio_closed_proposal_${vault.address}`));
+  });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setIsProposalClosedLocally(Boolean(localStorage.getItem(`folio_closed_proposal_${vault.address}`)));
+    }
+  }, [vault.address]);
+
+  const activeProposal = vault.openProposal && !isProposalClosedLocally ? vault.openProposal : null;
+
 
   // Smart initial open state: open the step requiring attention
   const defaultOpenDrawer = useMemo(() => {
@@ -157,7 +173,15 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
     try {
       const res = await forceRebalance(vault);
       const count = res.trades?.length ?? 1;
+      if (vault.openProposal) {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(`folio_closed_proposal_${vault.address}`, String(vault.openProposal.id));
+          localStorage.removeItem(`folio_has_proposal_${vault.address}`);
+        }
+        setIsProposalClosedLocally(true);
+      }
       notify(`1-Click Rebalance executed! ${count} trade${count > 1 ? 's' : ''} confirmed on-chain.`);
+      void queryClient.invalidateQueries({queryKey: [VAULTS_KEY]});
     } catch (caught) {
       const message = explainError(caught);
       setRebalanceError(message);
@@ -179,7 +203,9 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
         localStorage.setItem(`folio_closed_proposal_${vault.address}`, String(vault.openProposal.id));
         localStorage.removeItem(`folio_has_proposal_${vault.address}`);
       }
+      setIsProposalClosedLocally(true);
       notify('Proposal concluded. 0.05 SOL bond refunded immediately to curator wallet.');
+      void queryClient.invalidateQueries({queryKey: [VAULTS_KEY]});
       router.refresh();
     } catch (caught) {
       const message = explainError(caught);
@@ -570,14 +596,14 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                   </button>
                 ) : (
                   <div className="w-full space-y-2">
-                    {vault.openProposal ? (
+                    {activeProposal ? (
                       <div className="rounded-lg border border-[#c2b280] bg-[#fffbf0] p-2.5 text-[11px] text-[#7a6b32]">
                         <div className="flex items-center justify-between font-bold">
-                          <span>Governance Proposal #{vault.openProposal.id}</span>
-                          <span className="font-mono text-[10px] uppercase">{vault.openProposal.status}</span>
+                          <span>Governance Proposal #{activeProposal.id}</span>
+                          <span className="font-mono text-[10px] uppercase">{activeProposal.status}</span>
                         </div>
                         <p className="mt-1 text-[10px] text-[#6b746c]">
-                          Bond attached: {formatSol(vault.openProposal.bondLamports)}. You can force rebalancing now or conclude this proposal to immediately refund the bond to your wallet and close the voting panel.
+                          Bond attached: {formatSol(activeProposal.bondLamports)}. You can force rebalancing now or conclude this proposal to immediately refund the bond to your wallet and close the voting panel.
                         </p>
                         <div className="mt-2 flex gap-2">
                           <button
@@ -809,6 +835,12 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                 className="mt-1 h-8 w-full rounded border border-[#cdd3ca] bg-white px-2 font-mono text-[12px] font-bold"
               />
             </div>
+
+            {vault.openProposal && isProposalClosedLocally && (
+              <div className="mt-3 rounded border border-[#c2b280] bg-[#fffbf0] p-2.5 text-[10px] text-[#7a6b32]">
+                Proposal #{vault.openProposal.id} on this vault has been concluded & refunded. Note: on Solana devnet, the program allows 1 proposal per vault at a time until the voting duration expires. If you want to propose another vote immediately, test with a newly created vault.
+              </div>
+            )}
 
             <div className="mt-5 flex gap-2">
               <button

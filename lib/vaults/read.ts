@@ -207,7 +207,11 @@ export async function readVault(vaultParam: string, account?: PublicKey, prices?
         else if (statusKey === 'rejected') status = 'Rejected';
         else if (statusKey === 'executed') status = 'Executed';
 
-        if (status === 'Executed' || status === 'Rejected') {
+        if (
+          status === 'Executed' ||
+          status === 'Rejected' ||
+          isProposalClosed(address.toBase58(), prop.id.toNumber())
+        ) {
           openProposal = null;
         } else {
           const bondRefunded = isProposalClosed(address.toBase58(), prop.id.toNumber());

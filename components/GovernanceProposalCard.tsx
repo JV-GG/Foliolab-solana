@@ -1,8 +1,9 @@
 'use client';
 
 import {useState} from 'react';
+import {useQueryClient} from '@tanstack/react-query';
 import type {VaultView} from '@/lib/vaults/read';
-import {useVote, useFinalizeProposal, useExecuteProposal, explainError} from '@/lib/contracts/hooks';
+import {useVote, useFinalizeProposal, useExecuteProposal, explainError, VAULTS_KEY} from '@/lib/contracts/hooks';
 import {useConnection} from '@/lib/contracts/wallet';
 import {sameAddress} from '@/components/curator/model';
 import {useNotify} from '@/components/Toast';
@@ -15,6 +16,7 @@ interface Props {
 
 export function GovernanceProposalCard({vault, connected}: Props) {
   const notify = useNotify();
+  const queryClient = useQueryClient();
   const {address} = useConnection();
   const isCurator = Boolean(address && sameAddress(vault.manager, address));
   const proposal = vault.openProposal;
@@ -23,8 +25,12 @@ export function GovernanceProposalCard({vault, connected}: Props) {
   const {execute, pending: executing} = useExecuteProposal();
   const [error, setError] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
+  const [closedLocally, setClosedLocally] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return Boolean(localStorage.getItem(`folio_closed_proposal_${vault.address}`));
+  });
 
-  if (!proposal || proposal.status === 'Executed' || proposal.status === 'Rejected') {
+  if (!proposal || proposal.status === 'Executed' || proposal.status === 'Rejected' || closedLocally) {
     return null;
   }
 
@@ -51,8 +57,9 @@ export function GovernanceProposalCard({vault, connected}: Props) {
         localStorage.setItem(`folio_closed_proposal_${vault.address}`, String(proposal.id));
         localStorage.removeItem(`folio_has_proposal_${vault.address}`);
       }
+      setClosedLocally(true);
       notify('0.05 SOL proposal bond refunded immediately to curator. Voting panel closed.');
-      window.location.reload();
+      void queryClient.invalidateQueries({queryKey: [VAULTS_KEY]});
     } catch (err) {
       const msg = explainError(err);
       setError(msg);

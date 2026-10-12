@@ -136,6 +136,8 @@ export function explainError(error: unknown): string {
       return 'This trade would lose more than 2% against market prices, so the vault refused it.';
     case 'NoPlanPosted':
       return 'Post a plan before the first trade.';
+    case 'ProposalAlreadyOpen':
+      return 'This vault already has an on-chain proposal cycle active until voting concludes (on-chain rule: 1 proposal per vault at a time).';
     case null:
       break;
     default:
