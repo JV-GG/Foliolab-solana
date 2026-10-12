@@ -66,6 +66,12 @@ async function send(ixs: TransactionInstruction[], signers: Keypair[]) {
   return sendAndConfirmTransaction(connection, new Transaction().add(...ixs), signers, {commitment: 'confirmed'});
 }
 
+/** Prints a Solana Explorer link for a transaction, for the README's demo section. */
+function link(step: string, signature: string) {
+  const suffix = CLUSTER === 'localnet' ? `?cluster=custom&customUrl=${encodeURIComponent(RPC)}` : `?cluster=${CLUSTER}`;
+  console.log(`  ${step}: https://explorer.solana.com/tx/${signature}${suffix}`);
+}
+
 async function main() {
   const vault = new PublicKey(d.vaults[0]);
   const usdc = new PublicKey(d.usdc);
@@ -85,7 +91,9 @@ async function main() {
   });
   const ftx = Transaction.from(Buffer.from(faucet.transaction, 'base64'));
   ftx.partialSign(investor);
-  await connection.confirmTransaction(await connection.sendRawTransaction(ftx.serialize()), 'confirmed');
+  const faucetSig = await connection.sendRawTransaction(ftx.serialize());
+  await connection.confirmTransaction(faucetSig, 'confirmed');
+  link('faucet', faucetSig);
   console.log('faucet ok:', (await connection.getTokenAccountBalance(ata(investor.publicKey, usdc, TOKEN_PROGRAM_ID))).value.uiAmountString, 'USDC');
 
   // 2. Deposit 50 USDC with fresh signed prices.
@@ -108,7 +116,7 @@ async function main() {
     })
     .remainingAccounts(heldAccounts(vault, before.held, programs))
     .instruction();
-  await send([priceSignatureIx(signed), deposit], [investor]);
+  link('deposit', await send([priceSignatureIx(signed), deposit], [investor]));
   const shares = (await program.account.position.fetch(positionPda(vault, investor.publicKey))).shares;
   console.log(`deposit ok: ${shares.toNumber() / 1e6} shares for 50 USDC`);
 
@@ -144,7 +152,7 @@ async function main() {
       ...built.trade.routeAccounts.map((a) => ({...a, pubkey: new PublicKey(a.pubkey)})),
     ])
     .instruction();
-  await send([ComputeBudgetProgram.setComputeUnitLimit({units: 400_000}), priceSignatureIx(tradePrices), rebalance], [manager]);
+  link('rebalance', await send([ComputeBudgetProgram.setComputeUnitLimit({units: 400_000}), priceSignatureIx(tradePrices), rebalance], [manager]));
   console.log('rebalance ok: held', (await program.account.vault.fetch(vault)).held.length, 'assets');
 
   // 4. Redeem everything: create the investor's token accounts first.
@@ -165,7 +173,7 @@ async function main() {
     })
     .remainingAccounts(heldAccounts(vault, after.held, finalPrograms, investor.publicKey))
     .instruction();
-  await send([...createAtas, redeem], [investor]);
+  link('redeem', await send([...createAtas, redeem], [investor]));
   for (const mint of after.held) {
     const p = finalPrograms.get(mint.toBase58())!;
     const bal = await connection.getTokenAccountBalance(ata(investor.publicKey, mint, p));

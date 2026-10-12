@@ -334,18 +334,32 @@ fn redeem(env: &mut Env, who: &Keypair, shares: u64) -> Result<(), String> {
 
 /// Sell `amount_in` of `sell` for `amount_out` of `buy` through the mock router.
 fn rebalance(env: &mut Env, sell: Pubkey, buy: Pubkey, amount_in: u64, amount_out: u64, p: &PriceUpdate) -> Result<(), String> {
+    rebalance_routed(env, sell, buy, sell, amount_in, amount_out, p)
+}
+
+/// Like `rebalance`, but the route actually sells `route_sell`, which may differ from the declared
+/// `sell`: what a dishonest manager would try.
+fn rebalance_routed(
+    env: &mut Env,
+    sell: Pubkey,
+    buy: Pubkey,
+    route_sell: Pubkey,
+    amount_in: u64,
+    amount_out: u64,
+    p: &PriceUpdate,
+) -> Result<(), String> {
     let (pool, _) = Pubkey::find_program_address(&[b"pool"], &mock_router::id());
-    let (sp, bp) = (program_of(env, &sell), program_of(env, &buy));
+    let (sp, bp, rp) = (program_of(env, &sell), program_of(env, &buy), program_of(env, &route_sell));
     let route = mock_router::accounts::Swap {
         user: env.vault,
-        user_src: ata(env, &env.vault, &sell),
+        user_src: ata(env, &env.vault, &route_sell),
         user_dst: ata(env, &env.vault, &buy),
         pool,
-        pool_src: get_associated_token_address_with_program_id(&pool, &sell, &sp),
+        pool_src: get_associated_token_address_with_program_id(&pool, &route_sell, &rp),
         pool_dst: get_associated_token_address_with_program_id(&pool, &buy, &bp),
-        src_mint: sell,
+        src_mint: route_sell,
         dst_mint: buy,
-        src_token_program: sp,
+        src_token_program: rp,
         dst_token_program: bp,
     }
     .to_account_metas(None)
@@ -514,6 +528,18 @@ fn rebalance_refuses_loss_over_two_percent() {
     assert!(err.contains("TradeLossTooHigh"), "{err}");
     // 0.099 AAPL ($19.80): a 1% loss is fine.
     rebalance(&mut env, usdc, aapl, 20 * USDC, 9_900_000, &p).unwrap();
+}
+
+#[test]
+fn rebalance_refuses_route_that_drains_another_holding() {
+    let mut env = active_env();
+    let (usdc, aapl, nvda) = (env.usdc, env.aapl, env.nvda);
+    let p = prices(&[(aapl, 200 * USDC), (nvda, 100 * USDC)], NOW);
+    rebalance(&mut env, usdc, aapl, 20 * USDC, 10 * STOCK / 100, &p).unwrap();
+    // Declared: sell USDC for NVDA. The route really sells the vault's AAPL instead.
+    let err = rebalance_routed(&mut env, usdc, nvda, aapl, 10 * STOCK / 100, 20 * STOCK / 100, &p).unwrap_err();
+    assert!(err.contains("CollateralDecreased"), "{err}");
+    assert_eq!(balance(&env.svm, &ata(&env, &env.vault, &aapl)), 10 * STOCK / 100);
 }
 
 #[test]

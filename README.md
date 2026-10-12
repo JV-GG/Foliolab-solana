@@ -8,7 +8,7 @@ Built for the Solana track: an Anchor program in Rust, a Next.js app, and devnet
 
 | | |
 |---|---|
-| Live app | _Vercel URL: to be added_ |
+| Live app | [foliolab-solana.vercel.app](https://foliolab-solana.vercel.app) (devnet; connect Phantom in devnet mode) |
 | Cluster | Solana devnet (mock stock tokens and mock router) |
 | Program | `folio_vault` — [`9PY9RRXQuMtHXDyvWNL5ohFrsSux5SLrJhhdtuBgLUJH`](https://explorer.solana.com/address/9PY9RRXQuMtHXDyvWNL5ohFrsSux5SLrJhhdtuBgLUJH?cluster=devnet) (devnet) |
 | Stack | Rust + Anchor 1.2.1 · LiteSVM tests · Next.js 16 + React 19 |
@@ -21,6 +21,30 @@ Built for the Solana track: an Anchor program in Rust, a Next.js app, and devnet
 - **Deposits never dilute existing holders.** New shares are priced from the vault's full holdings using backend-signed prices (ed25519, at most 60 s old), rounded in favour of existing holders.
 - **The plan is public.** `set_plan` stores the curator's plan as free text with a version number. A plan must exist before the first trade, and every `Rebalanced` event records the plan version.
 - **Shares cannot be transferred.** They live in a per-investor `Position` account, not a token.
+
+## Devnet deployment
+
+| What | Address |
+|---|---|
+| `folio_vault` program | [`9PY9RRXQuMtHXDyvWNL5ohFrsSux5SLrJhhdtuBgLUJH`](https://explorer.solana.com/address/9PY9RRXQuMtHXDyvWNL5ohFrsSux5SLrJhhdtuBgLUJH?cluster=devnet) |
+| `mock_router` program | [`FeE32TVg1Yk4DVe4jS3SELK13dQsbbDUWyY4dYKmQhjm`](https://explorer.solana.com/address/FeE32TVg1Yk4DVe4jS3SELK13dQsbbDUWyY4dYKmQhjm?cluster=devnet) |
+| Registry | [`4on5rPymYh1W7sLe6LA3WYwXBR2wgBG5KiqSrMucQHC1`](https://explorer.solana.com/address/4on5rPymYh1W7sLe6LA3WYwXBR2wgBG5KiqSrMucQHC1?cluster=devnet) |
+| Demo vault "Big Tech Core" | [`2cRhpsvAaLDE4e18rjrLczM1zBkwFMgZUU9mdNqWk4X9`](https://explorer.solana.com/address/2cRhpsvAaLDE4e18rjrLczM1zBkwFMgZUU9mdNqWk4X9?cluster=devnet) |
+| Mock USDC | [`DKg3JGudRDDWymeLhWVEjhfagNGi93SGYdRb7A8TuHdv`](https://explorer.solana.com/address/DKg3JGudRDDWymeLhWVEjhfagNGi93SGYdRb7A8TuHdv?cluster=devnet) |
+| AAPLx (Token-2022) | [`AtVJpQjnBuhQwHFhdadj7TuNnbK2u4Aonu2wcZgGSBVJ`](https://explorer.solana.com/address/AtVJpQjnBuhQwHFhdadj7TuNnbK2u4Aonu2wcZgGSBVJ?cluster=devnet) |
+| NVDAx (SPL Token) | [`E87tWL7sLcD5GrpcJkewquzri9Na2sJsrV5JcLt8Ce6g`](https://explorer.solana.com/address/E87tWL7sLcD5GrpcJkewquzri9Na2sJsrV5JcLt8Ce6g?cluster=devnet) |
+| TSLAx (Token-2022) | [`5qEVYEWHpL7sxuBH3EMHnNzjHfnUSMujuCbgfMNbxTH5`](https://explorer.solana.com/address/5qEVYEWHpL7sxuBH3EMHnNzjHfnUSMujuCbgfMNbxTH5?cluster=devnet) |
+
+### Demo transactions (devnet, 12 Oct 2026)
+
+One investor's full round trip, run by `npm run smoke:solana`:
+
+| Step | Transaction |
+|---|---|
+| Get 1,000 test USDC from the faucet | [`3zk2Each…`](https://explorer.solana.com/tx/3zk2Each77syJfwixr38szeKgpoxoooZAFYA6nfrhEfn5FBaBiQJBhTemgMcJjqiNpKt6bTrpthaxv5LPC8S6frX?cluster=devnet) |
+| Deposit 50 USDC with signed prices (Ed25519 instruction + `deposit`) | [`fXqbNuAv…`](https://explorer.solana.com/tx/fXqbNuAvg5wQfHBSN2sTCKPJwFubjRefkZAN9T7akYmeE6yKgr9iPsVeKDN7C33nWDdTAEsYm4fzXPZSaGyHh6d?cluster=devnet) |
+| Curator rebalances 10 USDC into NVDAx through the router (CPI, 2% loss check) | [`RDCdDxy6…`](https://explorer.solana.com/tx/RDCdDxy6UCSfxrfWGriJSZY6zv4Rn44BfC75n58Y98p3ChpRAMaQYDzMkEN9aQ2Sjyf6UiNiTHf5uqW6nUv6h8S?cluster=devnet) |
+| Investor withdraws everything in kind (USDC + AAPLx + NVDAx) | [`63vAVvpG…`](https://explorer.solana.com/tx/63vAVvpG8m8hBH2iGPHgLvTvmvEF2n5w7GaBPEDNHX1MexgKe5rVWyUNT7VFAJHWsaUok2s6Cu8imMbSji6U3B2B?cluster=devnet) |
 
 ## How it works
 
@@ -71,7 +95,7 @@ cp .env.example .env.local     # see the comments in it for every value
 ```bash
 cd anchor
 anchor build --arch v0
-cargo test -p folio_vault      # full flow + refusal cases, no validator needed
+cargo test -p folio_vault      # 12 tests: full flow + refusal cases, incl. a dishonest route; no validator
 ```
 
 ### Local validator (no devnet SOL needed)
@@ -95,10 +119,10 @@ CLUSTER=devnet npm run setup:solana
 
 | Part | State |
 |---|---|
-| Solana program + tests | Done (11 LiteSVM tests passing) |
+| Solana program + tests | Done (12 LiteSVM tests passing, including a dishonest-route attack) |
 | Setup script, backend API, frontend (wallet adapter) | Done; end-to-end smoke test passes on a local validator |
-| Devnet deployment | Done: programs, mock tokens, registry, demo vault; end-to-end test passes on devnet |
-| Vercel | Deployed; serves the Solana build once `jv` is merged into `main` |
+| Devnet deployment | Done; demo transactions above |
+| Vercel | Deployed from `main` |
 
 ## Limits and known issues
 

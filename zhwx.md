@@ -28,8 +28,11 @@ written so you can pick one and do it.
   test (faucet → deposit → rebalance → withdraw) **passes on devnet**.
 - ✅ **No BNB left:** BNB explorer pages, EVM docs and BNB hackathon notes removed; `AGENTS.md`/`CLAUDE.md`
   describe the Solana project. (Binance market data is still the off-chain price source.)
-- ⚠️ **Vercel shows the old BNB site** until branch `jv` is merged into `main` and the Vercel env vars
-  below are set.
+- ✅ **Live on Vercel:** https://foliolab-solana.vercel.app serves the Solana app (pages, vaults, history work).
+- ❌ **Vercel is missing the 3 secret keys** (`PRICE_SIGNER_SECRET_KEY`, `GUARDIAN_SECRET_KEY`,
+  `FAUCET_SECRET_KEY`), so on the live site deposits, trades, test USDC and activation fail. Checked 12 Oct.
+- ✅ **Demo transactions** (faucet, deposit, rebalance, withdraw) are on devnet and linked in `README.md`.
+- ✅ **Attack test:** a route that sells a different holding than declared is refused (`CollateralDecreased`).
 - ❌ No browser-wallet click-through yet, no demo video, no DX report.
 
 ### Devnet addresses
@@ -56,7 +59,7 @@ RPC such as Helius; the public one returns HTTP 429 under load), `PRICE_SIGNER_S
 | What | Where |
 |---|---|
 | Anchor workspace (Anchor **1.2.1**): `folio_vault` (registry, vaults, deposit, redeem, plan, rebalance) + `mock_router` (Jupiter stand-in) | `anchor/` |
-| 11 LiteSVM program tests, **all passing** | `anchor/programs/folio_vault/tests/test_vault.rs` |
+| 12 LiteSVM program tests, **all passing** (incl. a dishonest-route attack) | `anchor/programs/folio_vault/tests/test_vault.rs` |
 | Shared TS client: IDLs, PDAs, token accounts, price message, Ed25519 instruction | `lib/solana/program.ts`, `lib/solana/idl/` |
 | Cluster config + address book (written by the setup script) | `lib/solana/config.ts`, `lib/solana/addresses.json` |
 | **Setup script**: mock USDC/AAPLx/NVDAx/TSLAx mints, registry, allowlist, guardian, router pool, demo vault (seeded, active, plan, one AAPLx buy). Idempotent. | `scripts/setup-solana.ts` (`npm run setup:solana`) |
@@ -81,8 +84,7 @@ Keys on Jun Voon's Mac (outside the repo, never commit): deploy wallet `~/.confi
 | Merge `jv` into `main` | Not done. |
 | Click-through test in a real browser wallet | Not done (the API + program flow is proven by the smoke test; the React screens compile and render). |
 | Live Binance prices | Untested on Solana: local runs used `PRICE_SOURCE=static`. Mock tokens are priced from the underlying ticker (AAPLx → AAPL) via the Binance RWA listing; if the market is closed, signing is refused unless `PRICE_REQUIRE_OPEN_MARKET=false` or `PRICE_SOURCE=static`. |
-| Vercel serving the Solana build | Merge `jv` → `main` and set the env vars above. |
-| Malicious-router test | Not written. The checks exist in code. |
+| **Vercel secret keys** | Missing on the live site. Add the 3 keys for Production (`pbcopy < ~/folio-price-signer.json`, then `~/folio-guardian.json`, `~/folio-faucet.json`) and redeploy. |
 | Real Jupiter swap (mainnet) | Not attempted. `/api/trade` returns 501 on mainnet. |
 | Demo video, developer-experience report | Not started. **The DX report must be written by the team, not by AI.** |
 
@@ -122,16 +124,16 @@ In Phantom: Settings → Developer settings → enable testnet mode and add a cu
 **+ Test USDC** on the investor page, deposit, withdraw; on `/curator` create a vault, post a plan, rebalance.
 Fix any UI bug you hit.
 
-### Task 3 — Vercel (Part 4)
+### Task 3 — Vercel (Part 4) — deployed; add the 3 secret keys
 Set env vars from `.env.example` with `NEXT_PUBLIC_SOLANA_CLUSTER=devnet`, a devnet RPC (Helius free tier
 recommended), the three secret keys, Binance keys, `PRICE_SOURCE=binance` (or `static` if the US market is
-closed during judging and Binance refuses to sign). Deploy, then put the URL and demo tx links in `README.md`.
+closed during judging and Binance refuses to sign). Then redeploy and run `APP_URL=https://foliolab-solana.vercel.app CLUSTER=devnet npm run smoke:solana`.
 
 ### Task 4 — Submission
 Demo video; developer-experience report (team-written).
 
 ### Task 5 — Nice to have
-Malicious-router test; Jupiter route for mainnet in `lib/trade/build.ts`; Pyth prices instead of the signer.
+Delegate/close-authority attack test (needs a test-only router); Jupiter route for mainnet in `lib/trade/build.ts`; Pyth prices instead of the signer.
 
 ## 5. Interfaces (the contract other parts build against)
 
