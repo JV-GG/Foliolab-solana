@@ -24,8 +24,7 @@ export function GovernanceProposalCard({vault, connected}: Props) {
   const [error, setError] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
 
-  const isClosedLocally = typeof window !== 'undefined' && localStorage.getItem(`folio_closed_proposal_${vault.address}`) === String(proposal?.id);
-  if (!proposal || proposal.status === 'Executed' || proposal.status === 'Rejected' || isClosedLocally) {
+  if (!proposal || proposal.status === 'Executed' || proposal.status === 'Rejected') {
     return null;
   }
 
@@ -122,7 +121,7 @@ export function GovernanceProposalCard({vault, connected}: Props) {
         <div className="flex items-center gap-2">
           {proposal.bondLamports && (
             <span className="rounded-full border border-[#2b4c3f]/20 bg-[#2b4c3f]/5 px-2.5 py-1 font-mono text-[10px] font-semibold text-[#2b4c3f]">
-              Bond: {formatSol(proposal.bondLamports)}
+              Bond: {formatSol(proposal.bondLamports)} {proposal.bondRefunded ? '(Refunded)' : ''}
             </span>
           )}
           <span
@@ -283,16 +282,21 @@ export function GovernanceProposalCard({vault, connected}: Props) {
           )}
 
           {/* Instant Refund & Close Option (Curator only) */}
-          {isCurator && (
+          {isCurator && !proposal.bondRefunded && (
             <button
               type="button"
               disabled={closing}
               onClick={handleRefundAndClose}
               className="rounded-lg border border-[#c2b280] bg-[#fffbf0] px-3.5 py-2 text-[11px] font-bold text-[#7a6b32] hover:bg-[#faedd0] transition"
-              title="Conclude voting, refund the 0.05 SOL bond immediately to curator and close this panel"
+              title="Conclude voting, refund the 0.05 SOL bond immediately to curator"
             >
               {closing ? 'Refunding…' : '⚡ Conclude & Refund 0.05 SOL'}
             </button>
+          )}
+          {proposal.bondRefunded && (
+            <span className="rounded-lg border border-[#237b68]/30 bg-[#237b68]/10 px-3 py-1.5 text-[11px] font-semibold text-[#237b68]">
+              ✓ Bond Refunded
+            </span>
           )}
         </div>
       </div>

@@ -52,6 +52,7 @@ export interface ProposalView {
   address: string;
   proposer: string;
   bondLamports: string;
+  bondRefunded?: boolean;
   planText: string;
   targets: TargetWeight[];
   votingEndsAt: number; // unix ms
@@ -206,9 +207,10 @@ export async function readVault(vaultParam: string, account?: PublicKey, prices?
         else if (statusKey === 'rejected') status = 'Rejected';
         else if (statusKey === 'executed') status = 'Executed';
 
-        if (status === 'Executed' || status === 'Rejected' || isProposalClosed(address.toBase58(), prop.id.toNumber())) {
+        if (status === 'Executed' || status === 'Rejected') {
           openProposal = null;
         } else {
+          const bondRefunded = isProposalClosed(address.toBase58(), prop.id.toNumber());
           const totalVotes = prop.yesVotes.add(prop.noVotes);
           const yesPercent = totalVotes.gt(new BN(0))
             ? (prop.yesVotes.toNumber() / totalVotes.toNumber()) * 100
@@ -237,6 +239,7 @@ export async function readVault(vaultParam: string, account?: PublicKey, prices?
             address: proposalAddress.toBase58(),
             proposer: prop.proposer.toBase58(),
             bondLamports: prop.bond.toString(),
+            bondRefunded,
             planText: prop.plan,
             targets: propTargets,
             votingEndsAt: prop.votingEndsAt.toNumber() * 1000,

@@ -44,7 +44,7 @@ export function useSendTransaction() {
       if (!publicKey) throw new Error('Connect a wallet first.');
       const {blockhash, lastValidBlockHeight} = await connection.getLatestBlockhash('confirmed');
 
-      let tx: Transaction | VersionedTransaction;
+      let tx: Transaction | VersionedTransaction | null = null;
       if (input instanceof VersionedTransaction) {
         tx = input;
         if (signers.length) tx.sign(signers);
@@ -80,7 +80,34 @@ export function useSendTransaction() {
         }
       }
 
-      const signature = await sendTransaction(tx!, connection, {preflightCommitment: 'confirmed'});
+      let signature: string;
+      try {
+        signature = await sendTransaction(tx!, connection, {preflightCommitment: 'confirmed'});
+      } catch (err: any) {
+        const logs = err?.logs || err?.error?.logs;
+        if (logs && Array.isArray(logs)) {
+          const anchorErr = logs.find((l: string) => l.includes('Error Message:'));
+          if (anchorErr) {
+            throw new Error(anchorErr.replace(/^.*Error Message:\s*/, ''));
+          }
+        }
+        if (tx) {
+          try {
+            const sim = await connection.simulateTransaction(tx as any);
+            if (sim.value.logs) {
+              const anchorErr = sim.value.logs.find((l: string) => l.includes('Error Message:'));
+              if (anchorErr) {
+                throw new Error(anchorErr.replace(/^.*Error Message:\s*/, ''));
+              }
+            }
+          } catch (simErr: any) {
+            if (simErr.message && !simErr.message.includes('Unexpected error')) {
+              throw simErr;
+            }
+          }
+        }
+        throw err;
+      }
       const result = await connection.confirmTransaction(
         {signature, blockhash, lastValidBlockHeight},
         'confirmed',
