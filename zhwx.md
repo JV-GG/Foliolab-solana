@@ -29,8 +29,8 @@ written so you can pick one and do it.
 - ✅ **No BNB left:** BNB explorer pages, EVM docs and BNB hackathon notes removed; `AGENTS.md`/`CLAUDE.md`
   describe the Solana project. (Binance market data is still the off-chain price source.)
 - ✅ **Live on Vercel:** https://foliolab-solana.vercel.app serves the Solana app (pages, vaults, history work).
-- ❌ **Vercel is missing the 3 secret keys** (`PRICE_SIGNER_SECRET_KEY`, `GUARDIAN_SECRET_KEY`,
-  `FAUCET_SECRET_KEY`), so on the live site deposits, trades, test USDC and activation fail. Checked 12 Oct.
+- ✅ **Live site fully working (12 Oct):** Vercel env set to devnet with all 3 secret keys; the end-to-end
+  test (`APP_URL=https://foliolab-solana.vercel.app CLUSTER=devnet npm run smoke:solana`) passes against it.
 - ✅ **Demo transactions** (faucet, deposit, rebalance, withdraw) are on devnet and linked in `README.md`.
 - ✅ **Attack test:** a route that sells a different holding than declared is refused (`CollateralDecreased`).
 - ❌ No browser-wallet click-through yet, no demo video, no DX report.
@@ -84,7 +84,6 @@ Keys on Jun Voon's Mac (outside the repo, never commit): deploy wallet `~/.confi
 | Merge `jv` into `main` | Not done. |
 | Click-through test in a real browser wallet | Not done (the API + program flow is proven by the smoke test; the React screens compile and render). |
 | Live Binance prices | Untested on Solana: local runs used `PRICE_SOURCE=static`. Mock tokens are priced from the underlying ticker (AAPLx → AAPL) via the Binance RWA listing; if the market is closed, signing is refused unless `PRICE_REQUIRE_OPEN_MARKET=false` or `PRICE_SOURCE=static`. |
-| **Vercel secret keys** | Missing on the live site. Add the 3 keys for Production (`pbcopy < ~/folio-price-signer.json`, then `~/folio-guardian.json`, `~/folio-faucet.json`) and redeploy. |
 | Real Jupiter swap (mainnet) | Not attempted. `/api/trade` returns 501 on mainnet. |
 | Demo video, developer-experience report | Not started. **The DX report must be written by the team, not by AI.** |
 
@@ -124,7 +123,7 @@ In Phantom: Settings → Developer settings → enable testnet mode and add a cu
 **+ Test USDC** on the investor page, deposit, withdraw; on `/curator` create a vault, post a plan, rebalance.
 Fix any UI bug you hit.
 
-### Task 3 — Vercel (Part 4) — deployed; add the 3 secret keys
+### Task 3 — Vercel (Part 4) — done 12 Oct (env set, live end-to-end test passes)
 Set env vars from `.env.example` with `NEXT_PUBLIC_SOLANA_CLUSTER=devnet`, a devnet RPC (Helius free tier
 recommended), the three secret keys, Binance keys, `PRICE_SOURCE=binance` (or `static` if the US market is
 closed during judging and Binance refuses to sign). Then redeploy and run `APP_URL=https://foliolab-solana.vercel.app CLUSTER=devnet npm run smoke:solana`.
