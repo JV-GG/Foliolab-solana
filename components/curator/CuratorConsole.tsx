@@ -12,12 +12,11 @@ import {AssetMap} from './AssetMap';
 import {CreateVaultCard} from './CreateVaultCard';
 import {CuratorModal} from './CuratorModal';
 import {PlanCard} from './PlanCard';
-import {RebalanceCard} from './RebalanceCard';
 import {sameAddress} from './model';
 import {useCuratorActions} from './useCuratorActions';
 import {VaultOverviewCard} from './VaultOverviewCard';
 
-type ManagerTab = 'plan' | 'rebalance' | 'activity';
+type ManagerTab = 'plan' | 'activity';
 type MobileView = 'controls' | 'map';
 
 export function CuratorConsole({artSample = false}: {artSample?: boolean} = {}) {
@@ -65,14 +64,17 @@ export function CuratorConsole({artSample = false}: {artSample?: boolean} = {}) 
                   />
                   <VaultOverviewCard vault={selected} />
                   <div className="border-y border-[#cdd3ca] bg-[#f1f3ee] p-2">
-                    <div className="folio-segmented grid w-full grid-cols-3">
-                      <TabButton active={managerTab === 'plan'} onClick={() => setManagerTab('plan')}>Plan</TabButton>
-                      <TabButton active={managerTab === 'rebalance'} onClick={() => setManagerTab('rebalance')}>Rebalance</TabButton>
+                    <div className="folio-segmented grid w-full grid-cols-2">
+                      <TabButton active={managerTab === 'plan'} onClick={() => setManagerTab('plan')}>Strategy & Index</TabButton>
                       <TabButton active={managerTab === 'activity'} onClick={() => setManagerTab('activity')}>Activity</TabButton>
                     </div>
                   </div>
                   <div className="p-4">
-                    {managerTab === 'plan' ? <PlanCard key={`${selected.address}-${selected.plan?.version ?? 0}`} vault={selected} managerAllowed={managerAllowed} /> : managerTab === 'rebalance' ? <RebalanceCard key={`${selected.address}-${selected.plan?.version ?? 0}-${selected.holdings.map((holding) => `${holding.asset}:${holding.amount}`).join('|')}`} vault={selected} managerAllowed={managerAllowed} /> : <ActivityPanel vaultName={selected.name} vaultAddress={selected.address} />}
+                    {managerTab === 'plan' ? (
+                      <PlanCard key={`${selected.address}-${selected.plan?.version ?? 0}`} vault={selected} managerAllowed={managerAllowed} />
+                    ) : (
+                      <ActivityPanel vaultName={selected.name} vaultAddress={selected.address} />
+                    )}
                   </div>
                 </>
               ) : (

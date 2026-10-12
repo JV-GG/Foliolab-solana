@@ -15,7 +15,7 @@ interface Props {
 
 export function PlanCard({vault, managerAllowed}: Props) {
   const notify = useNotify();
-  const {action, setStrategy, proposeStrategy, fundGas} = useCuratorActions();
+  const {action, setStrategy, proposeStrategy, fundGas, forceRebalance} = useCuratorActions();
 
   const tokens = useMemo(() => {
     try {
@@ -51,11 +51,29 @@ export function PlanCard({vault, managerAllowed}: Props) {
   const [votingDays, setVotingDays] = useState(3);
   const [error, setError] = useState<string | null>(null);
   const [showProposeModal, setShowProposeModal] = useState(false);
+  const [rebalancePending, setRebalancePending] = useState(false);
+  const [rebalanceError, setRebalanceError] = useState<string | null>(null);
 
   const bytes = utf8ByteLength(text);
   const validLength = bytes >= 1 && bytes <= MAX_PLAN_BYTES;
   const isDraftOrSeeded = vault.state === 'DRAFT' || vault.state === 'SEEDED';
   const isActive = vault.state === 'ACTIVE';
+
+  async function handleForceRebalance() {
+    if (!managerAllowed || !isActive || rebalancePending) return;
+    setRebalanceError(null);
+    setRebalancePending(true);
+    try {
+      const res = await forceRebalance(vault);
+      notify(`Forced rebalance executed! Signature: ${res.hash.slice(0, 8)}…`);
+    } catch (caught) {
+      const message = explainError(caught);
+      setRebalanceError(message);
+      notify(message);
+    } finally {
+      setRebalancePending(false);
+    }
+  }
 
   const totalPercent = useMemo(() => {
     return Object.values(weights).reduce((sum, v) => sum + (Number(v) || 0), 0);
@@ -168,6 +186,42 @@ export function PlanCard({vault, managerAllowed}: Props) {
           </div>
         )}
       </div>
+
+      {/* Autonomous Keeper Rebalance & Demo Trigger */}
+      {isActive && (
+        <div className="rounded-xl border border-[#237b68]/30 bg-[#f4f7f2] p-4 shadow-sm">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <span className="eyebrow text-[#237b68]">AUTONOMOUS KEEPER CRANK</span>
+              <h3 className="font-editorial text-[17px] font-medium text-[#2b3a30]">
+                Index Target Rebalance
+              </h3>
+            </div>
+            <span className="shrink-0 rounded-full border border-[#237b68]/20 bg-[#dfede8] px-2.5 py-1 font-mono text-[10px] font-bold text-[#237b68]">
+              Fee: 20k lamports
+            </span>
+          </div>
+
+          <p className="mt-2 text-[11px] leading-[1.6] text-[#556156]">
+            Keepers automatically rebalance the portfolio every 12 hours when holdings drift &gt; 1% from targets. For live testing or demo presentations, you can force an on-chain rebalancing cycle immediately.
+          </p>
+
+          {rebalanceError && (
+            <div className="mt-2 border-l-2 border-[#a14343] pl-2 text-[11px] text-[#8f3e3e]">
+              {rebalanceError}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => void handleForceRebalance()}
+            disabled={!managerAllowed || rebalancePending || publishing}
+            className="folio-button-primary mt-3 flex w-full items-center justify-center gap-2"
+          >
+            {rebalancePending ? 'Executing on-chain rebalance…' : '⚡ Force Keeper Rebalance Now'}
+          </button>
+        </div>
+      )}
 
       {/* Target Asset Allocation Weights */}
       <div className="space-y-3">
