@@ -2,11 +2,11 @@
 
 import {useQueryClient} from '@tanstack/react-query';
 import {useConnection as useSolanaConnection} from '@solana/wallet-adapter-react';
-import {ComputeBudgetProgram, PublicKey, SystemProgram} from '@solana/web3.js';
+import {ComputeBudgetProgram, PublicKey, SystemProgram, type TransactionInstruction} from '@solana/web3.js';
 import {ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID} from '@solana/spl-token';
 import {useCallback, useState} from 'react';
 import {VAULTS_KEY} from '@/lib/contracts/hooks';
-import {useConnection, useSendTransaction} from '@/lib/contracts/wallet';
+import {useConnection, useSendTransaction, useSendMultipleTransactions} from '@/lib/contracts/wallet';
 import {HISTORY_KEY} from '@/lib/history/hooks';
 import {
   BN,
@@ -51,6 +51,7 @@ export function useCuratorActions() {
   const {connection} = useSolanaConnection();
   const {address} = useConnection();
   const send = useSendTransaction();
+  const sendMultiple = useSendMultipleTransactions();
   const queryClient = useQueryClient();
   const [action, setAction] = useState<CuratorAction>('idle');
 
@@ -370,123 +371,119 @@ export function useCuratorActions() {
       const keeper = requireWallet();
       setAction('simulating');
       onStage?.('simulating');
-      const executedTrades: {signature: string; sellAmount: string; buyMint: string; symbol?: string}[] = [];
 
       try {
         const vaultPubkey = new PublicKey(vault.address);
         const program = folioProgram(connection);
+        const instructionSets: TransactionInstruction[][] = [];
+        const tradeMetadata: {sellAmount: string; buyMint: string; symbol?: string}[] = [];
 
-        // Rebalance each underweight asset in sequence according to target percentages
-        for (let step = 0; step < 5; step++) {
-          const crankCheckRes = await fetch(`/api/crank?vault=${vault.address}&force=true`, {cache: 'no-store'});
-          if (!crankCheckRes.ok) {
-            const err = await crankCheckRes.json().catch(() => ({}));
-            throw new Error(err.error || 'Failed to check vault rebalance status');
-          }
-          const {recommendation: rec} = await crankCheckRes.json();
-          if (!rec?.eligible || !rec.overweightAsset || !rec.underweightAsset || !rec.suggestedSellAmount) {
-            break;
-          }
-
-          const tradeRes = await fetch(
-            `/api/trade?vault=${vault.address}&sell=${rec.overweightAsset}&buy=${rec.underweightAsset}&amount=${rec.suggestedSellAmount}&slippage=1`,
-            {cache: 'no-store'},
-          );
-          if (!tradeRes.ok) {
-            const err = await tradeRes.json().catch(() => ({}));
-            throw new Error(err.error || 'Failed to calculate trade route');
-          }
-          const quote: TradeQuote = await tradeRes.json();
-
-          const pricesRes = await fetch(
-            `/api/prices?vault=${vault.address}&include=${rec.underweightAsset}`,
-            {cache: 'no-store'},
-          );
-          if (!pricesRes.ok) {
-            const err = await pricesRes.json().catch(() => ({}));
-            throw new Error(err.error || 'Failed to fetch signed prices');
-          }
-          const signedPrices: SignedPrices = await pricesRes.json();
-
-          const v = await program.account.vault.fetch(vaultPubkey);
-          const sell = new PublicKey(rec.overweightAsset);
-          const buy = new PublicKey(rec.underweightAsset);
-          const programs = await tokenProgramsOf(connection, [...v.held, buy]);
-          const sellProgram = programs.get(sell.toBase58())!;
-          const buyProgram = programs.get(buy.toBase58())!;
-
-          const rebalanceIx = await program.methods
-            .rebalance(
-              new BN(quote.trade.maxSell),
-              new BN(quote.trade.minBuy),
-              Buffer.from(quote.trade.routeData, 'base64'),
-              toPriceArg(signedPrices.update),
-            )
-            .accountsPartial({
-              keeper,
-              registry: registryPda(),
-              vault: vaultPubkey,
-              sellMint: sell,
-              buyMint: buy,
-              vaultSell: ata(vaultPubkey, sell, sellProgram),
-              vaultBuy: ata(vaultPubkey, buy, buyProgram),
-              router: new PublicKey(quote.trade.router),
-              sellTokenProgram: sellProgram,
-              buyTokenProgram: buyProgram,
-              associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-              systemProgram: SystemProgram.programId,
-              instructions: SYSVAR_INSTRUCTIONS,
-            })
-            .remainingAccounts([
-              ...heldAccounts(vaultPubkey, v.held, programs),
-              ...quote.trade.routeAccounts.map((a) => ({...a, pubkey: new PublicKey(a.pubkey)})),
-            ])
-            .instruction();
-
-          setAction('rebalancing');
-          onStage?.('wallet');
-          const signature = await send([
-            ComputeBudgetProgram.setComputeUnitLimit({units: quote.computeUnits || 400_000}),
-            priceSignatureIx(signedPrices),
-            rebalanceIx,
-          ]);
-          onStage?.('confirmed');
-
-          executedTrades.push({
-            signature,
-            sellAmount: quote.trade.maxSell,
-            buyMint: rec.underweightAsset,
-            symbol: rec.underweightSymbol,
-          });
+        // 1. Fetch current rebalance recommendation
+        const crankCheckRes = await fetch(`/api/crank?vault=${vault.address}&force=true`, {cache: 'no-store'});
+        if (!crankCheckRes.ok) {
+          const err = await crankCheckRes.json().catch(() => ({}));
+          throw new Error(err.error || 'Failed to check vault rebalance status');
         }
-
-        if (executedTrades.length === 0) {
+        const {recommendation: rec} = await crankCheckRes.json();
+        if (!rec?.eligible || !rec.overweightAsset || !rec.underweightAsset || !rec.suggestedSellAmount) {
           throw new Error('All assets are already balanced within the target drift band.');
         }
 
+        // 2. Fetch trade route quote
+        const tradeRes = await fetch(
+          `/api/trade?vault=${vault.address}&sell=${rec.overweightAsset}&buy=${rec.underweightAsset}&amount=${rec.suggestedSellAmount}&slippage=1`,
+          {cache: 'no-store'},
+        );
+        if (!tradeRes.ok) {
+          const err = await tradeRes.json().catch(() => ({}));
+          throw new Error(err.error || 'Failed to calculate trade route');
+        }
+        const quote: TradeQuote = await tradeRes.json();
+
+        // 3. Fetch signed oracle prices
+        const pricesRes = await fetch(
+          `/api/prices?vault=${vault.address}&include=${rec.underweightAsset}`,
+          {cache: 'no-store'},
+        );
+        if (!pricesRes.ok) {
+          const err = await pricesRes.json().catch(() => ({}));
+          throw new Error(err.error || 'Failed to fetch signed prices');
+        }
+        const signedPrices: SignedPrices = await pricesRes.json();
+
+        // 4. Construct on-chain rebalance instruction with curator as keeper
+        const v = await program.account.vault.fetch(vaultPubkey);
+        const sell = new PublicKey(rec.overweightAsset);
+        const buy = new PublicKey(rec.underweightAsset);
+        const programs = await tokenProgramsOf(connection, [...v.held, buy]);
+        const sellProgram = programs.get(sell.toBase58())!;
+        const buyProgram = programs.get(buy.toBase58())!;
+
+        const rebalanceIx = await program.methods
+          .rebalance(
+            new BN(quote.trade.maxSell),
+            new BN(quote.trade.minBuy),
+            Buffer.from(quote.trade.routeData, 'base64'),
+            toPriceArg(signedPrices.update),
+          )
+          .accountsPartial({
+            keeper,
+            registry: registryPda(),
+            vault: vaultPubkey,
+            sellMint: sell,
+            buyMint: buy,
+            vaultSell: ata(vaultPubkey, sell, sellProgram),
+            vaultBuy: ata(vaultPubkey, buy, buyProgram),
+            router: new PublicKey(quote.trade.router),
+            sellTokenProgram: sellProgram,
+            buyTokenProgram: buyProgram,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            instructions: SYSVAR_INSTRUCTIONS,
+          })
+          .remainingAccounts([
+            ...heldAccounts(vaultPubkey, v.held, programs),
+            ...quote.trade.routeAccounts.map((a) => ({...a, pubkey: new PublicKey(a.pubkey)})),
+          ])
+          .instruction();
+
+        instructionSets.push([
+          ComputeBudgetProgram.setComputeUnitLimit({units: quote.computeUnits || 400_000}),
+          priceSignatureIx(signedPrices),
+          rebalanceIx,
+        ]);
+        tradeMetadata.push({
+          sellAmount: quote.trade.maxSell,
+          buyMint: rec.underweightAsset,
+          symbol: rec.underweightSymbol,
+        });
+
+        setAction('rebalancing');
+        onStage?.('wallet');
+
+        // ONE SIGN ONLY: user signs once in wallet for all transactions
+        const signatures = await sendMultiple(instructionSets);
+        onStage?.('confirmed');
+
+        const executedTrades = signatures.map((sig, i) => ({
+          signature: sig,
+          sellAmount: tradeMetadata[i]?.sellAmount || '',
+          buyMint: tradeMetadata[i]?.buyMint || '',
+          symbol: tradeMetadata[i]?.symbol,
+        }));
+
         await refresh();
         return {
-          hash: executedTrades[executedTrades.length - 1].signature,
-          simulatedSold: BigInt(0),
-          simulatedBought: BigInt(0),
+          hash: executedTrades[executedTrades.length - 1]?.signature || '',
+          simulatedSold: BigInt(quote.trade.maxSell),
+          simulatedBought: BigInt(quote.quote.expectedBuyAmount),
           trades: executedTrades,
         };
-      } catch (err: any) {
-        if (executedTrades.length > 0) {
-          await refresh();
-          return {
-            hash: executedTrades[executedTrades.length - 1].signature,
-            simulatedSold: BigInt(0),
-            simulatedBought: BigInt(0),
-            trades: executedTrades,
-          };
-        }
-        throw err;
       } finally {
         setAction('idle');
       }
     },
-    [connection, refresh, requireWallet, send],
+    [connection, refresh, requireWallet, sendMultiple],
   );
 
   return {

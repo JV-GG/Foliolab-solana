@@ -91,3 +91,72 @@ export function useSendTransaction() {
     [connection, publicKey, sendTransaction],
   );
 }
+
+/**
+ * Signs and sends multiple transactions with ONE wallet approval modal using signAllTransactions.
+ * Falls back to sendTransaction if signAllTransactions is not supported.
+ */
+export function useSendMultipleTransactions() {
+  const {connection} = useSolanaConnection();
+  const {publicKey, signAllTransactions, sendTransaction} = useWallet();
+
+  return useCallback(
+    async (instructionSets: TransactionInstruction[][]): Promise<string[]> => {
+      if (!publicKey) throw new Error('Connect a wallet first.');
+      if (instructionSets.length === 0) return [];
+
+      const {blockhash, lastValidBlockHeight} = await connection.getLatestBlockhash('confirmed');
+      const d = deployment();
+      let altAccount = null;
+      if (d.lookupTable) {
+        try {
+          altAccount = (await connection.getAddressLookupTable(new PublicKey(d.lookupTable))).value;
+        } catch (err) {
+          console.warn('ALT lookup failed:', err);
+        }
+      }
+
+      // Compile each instruction set to VersionedTransaction (or legacy Transaction)
+      const txList: (VersionedTransaction | Transaction)[] = [];
+      for (const ixs of instructionSets) {
+        if (altAccount) {
+          const messageV0 = new TransactionMessage({
+            payerKey: publicKey,
+            recentBlockhash: blockhash,
+            instructions: ixs,
+          }).compileToV0Message([altAccount]);
+          txList.push(new VersionedTransaction(messageV0));
+        } else {
+          txList.push(new Transaction({feePayer: publicKey, blockhash, lastValidBlockHeight}).add(...ixs));
+        }
+      }
+
+      const signatures: string[] = [];
+
+      // ONE SIGN ONLY: Use signAllTransactions so user approves all in a single modal!
+      if (signAllTransactions && txList.length > 1) {
+        const signedList = await signAllTransactions(txList);
+        for (const signedTx of signedList) {
+          let sig: string;
+          if (signedTx instanceof VersionedTransaction) {
+            sig = await connection.sendTransaction(signedTx, {preflightCommitment: 'confirmed'});
+          } else {
+            sig = await connection.sendRawTransaction(signedTx.serialize(), {preflightCommitment: 'confirmed'});
+          }
+          await connection.confirmTransaction({signature: sig, blockhash, lastValidBlockHeight}, 'confirmed');
+          signatures.push(sig);
+        }
+      } else {
+        // Single transaction or fallback
+        for (const tx of txList) {
+          const sig = await sendTransaction(tx, connection, {preflightCommitment: 'confirmed'});
+          await connection.confirmTransaction({signature: sig, blockhash, lastValidBlockHeight}, 'confirmed');
+          signatures.push(sig);
+        }
+      }
+
+      return signatures;
+    },
+    [connection, publicKey, sendTransaction, signAllTransactions],
+  );
+}

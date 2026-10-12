@@ -180,11 +180,15 @@ export async function executeRebalanceCrank(
   const altAddress = d.lookupTable;
   const executedTrades: CrankTradeResult[] = [];
 
-  // Iterate to rebalance each underweight asset until the entire index portfolio is balanced
-  for (let step = 0; step < 8; step++) {
+  // Save gas fees: rebalance the most significant drifts and avoid wasting transactions on dust
+  for (let step = 0; step < 2; step++) {
     const vaultView = await readVault(vaultAddress);
     const rec = evaluateRebalance(vaultView, force || step > 0);
     if (!rec.eligible || !rec.overweightAsset || !rec.underweightAsset || !rec.suggestedSellAmount) {
+      break;
+    }
+    // If trade amount is negligible dust (< 1 USDC), stop to save gas fees
+    if (BigInt(rec.suggestedSellAmount) < BigInt(1_000_000)) {
       break;
     }
 

@@ -6,8 +6,8 @@
  * used to bound slippage and to show what a withdrawal pays out.
  */
 import {useQuery, useQueryClient} from '@tanstack/react-query';
-import {useConnection as useSolanaConnection} from '@solana/wallet-adapter-react';
-import {Connection, PublicKey, SystemProgram} from '@solana/web3.js';
+import {useConnection as useSolanaConnection, useWallet} from '@solana/wallet-adapter-react';
+import {Connection, PublicKey, SystemProgram, Transaction} from '@solana/web3.js';
 import {
   createAssociatedTokenAccountIdempotentInstruction,
   TOKEN_2022_PROGRAM_ID,
@@ -27,6 +27,7 @@ import {
   toPriceArg,
   tokenProgramsOf,
   usdToUnits,
+  voteRecordPda,
   type SignedPricesJson,
 } from '@/lib/solana/program';
 import folioIdl from '@/lib/solana/idl/folio_vault.json';
@@ -290,11 +291,12 @@ export function useTokenBalance(mint: string | undefined) {
   });
 }
 
-/** Vote on an active proposal with frozen snapshot voting power */
+/** Vote on an active proposal with frozen snapshot voting power — completely gasless for the investor */
 export function useVote() {
   const {connection} = useSolanaConnection();
   const queryClient = useQueryClient();
   const {address} = useConnection();
+  const {signTransaction} = useWallet();
   const send = useSendTransaction();
   const [pending, setPending] = useState(false);
 
@@ -303,6 +305,51 @@ export function useVote() {
       if (!address) throw new Error('Connect a wallet first.');
       setPending(true);
       try {
+        // 1. Try gasless sponsored vote via /api/vote (investor pays 0 gas fee and 0 rent)
+        if (signTransaction) {
+          try {
+            const prepRes = await fetch('/api/vote', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({
+                action: 'prepare',
+                vault: vaultAddress,
+                proposal: proposalAddress,
+                voter: address,
+                isYes,
+              }),
+            });
+
+            if (prepRes.ok) {
+              const data = await prepRes.json();
+              if (data.ok && data.transaction) {
+                const tx = Transaction.from(Buffer.from(data.transaction, 'base64'));
+
+                // Investor signs with wallet: network fee is 0 SOL (paid by server sponsor)
+                const signed = await signTransaction(tx);
+                const signedBase64 = Buffer.from(signed.serialize()).toString('base64');
+
+                const submitRes = await fetch('/api/vote', {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({
+                    action: 'submit',
+                    signedTx: signedBase64,
+                  }),
+                });
+
+                if (submitRes.ok) {
+                  await queryClient.invalidateQueries({queryKey: [VAULTS_KEY]});
+                  return;
+                }
+              }
+            }
+          } catch (sponsorErr) {
+            console.warn('Gasless vote sponsor failed, falling back to direct transaction:', sponsorErr);
+          }
+        }
+
+        // Direct fallback if sponsor unavailable
         const voter = new PublicKey(address);
         const vault = new PublicKey(vaultAddress);
         const proposal = new PublicKey(proposalAddress);
@@ -315,10 +362,7 @@ export function useVote() {
             vault,
             proposal,
             position: positionPda(vault, voter),
-            voteRecord: PublicKey.findProgramAddressSync(
-              [Buffer.from('vote'), proposal.toBuffer(), voter.toBuffer()],
-              program.programId,
-            )[0],
+            voteRecord: voteRecordPda(proposal, voter),
             systemProgram: SystemProgram.programId,
           })
           .instruction();
@@ -329,7 +373,7 @@ export function useVote() {
         setPending(false);
       }
     },
-    [address, connection, queryClient, send],
+    [address, connection, queryClient, send, signTransaction],
   );
 
   return {vote, pending};

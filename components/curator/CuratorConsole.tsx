@@ -11,10 +11,9 @@ import {ActivityPanel, ActivityStrip} from './ActivityPanel';
 import {AssetMap} from './AssetMap';
 import {CreateVaultCard} from './CreateVaultCard';
 import {CuratorModal} from './CuratorModal';
-import {PlanCard} from './PlanCard';
 import {sameAddress} from './model';
 import {useCuratorActions} from './useCuratorActions';
-import {VaultOverviewCard} from './VaultOverviewCard';
+import {CuratorStepDrawers} from './CuratorStepDrawers';
 
 type ManagerTab = 'plan' | 'activity';
 type MobileView = 'controls' | 'map';
@@ -55,23 +54,21 @@ export function CuratorConsole({artSample = false}: {artSample?: boolean} = {}) 
             <div className="flex-1">
               {selected ? (
                 <>
-                  <VaultStatus
-                    vault={selected}
-                    managerAllowed={managerAllowed}
-                    action={action}
-                    onSeed={() => void seedExistingVault(selected.address)}
-                    onActivate={() => void activateVault(selected.address)}
-                  />
-                  <VaultOverviewCard vault={selected} />
-                  <div className="border-y border-[#cdd3ca] bg-[#f1f3ee] p-2">
+                  <div className="border-b border-[#cdd3ca] bg-[#f1f3ee] p-2">
                     <div className="folio-segmented grid w-full grid-cols-2">
-                      <TabButton active={managerTab === 'plan'} onClick={() => setManagerTab('plan')}>Strategy & Index</TabButton>
+                      <TabButton active={managerTab === 'plan'} onClick={() => setManagerTab('plan')}>Setup & Strategy</TabButton>
                       <TabButton active={managerTab === 'activity'} onClick={() => setManagerTab('activity')}>Activity</TabButton>
                     </div>
                   </div>
-                  <div className="p-4">
+                  <div className="p-3">
                     {managerTab === 'plan' ? (
-                      <PlanCard key={`${selected.address}-${selected.plan?.version ?? 0}`} vault={selected} managerAllowed={managerAllowed} />
+                      <CuratorStepDrawers
+                        key={`${selected.address}-${selected.plan?.version ?? 0}`}
+                        vault={selected}
+                        managerAllowed={managerAllowed}
+                        onSeed={() => void seedExistingVault(selected.address)}
+                        onActivate={() => void activateVault(selected.address)}
+                      />
                     ) : (
                       <ActivityPanel vaultName={selected.name} vaultAddress={selected.address} />
                     )}
@@ -111,82 +108,7 @@ function VaultPicker({connected, managed, selected, loading, refreshing, error, 
   );
 }
 
-function VaultStatus({
-  vault,
-  managerAllowed,
-  action,
-  onSeed,
-  onActivate,
-}: {
-  vault: VaultView;
-  managerAllowed: boolean;
-  action: string;
-  onSeed?: () => void;
-  onActivate?: () => void;
-}) {
-  const busy = action === 'approving' || action === 'seeding' || action === 'activating';
 
-  return (
-    <div className="border-b border-[#cdd3ca] px-4 py-4">
-      <div className="flex items-center justify-between gap-2">
-        <p className="truncate text-[10px] text-[#717b72]">Manager {shortAddress(vault.manager)}</p>
-        <span
-          className={`folio-status ${
-            vault.state === 'ACTIVE'
-              ? 'folio-status-active'
-              : vault.state === 'CLOSED'
-                ? 'folio-status-closed'
-                : 'folio-status-neutral'
-          }`}
-        >
-          {vault.state}
-        </span>
-      </div>
-
-      {vault.state === 'DRAFT' && managerAllowed && (
-        <div className="mt-4 border-l-2 border-[#b18b15] pl-3 text-[11px] leading-5 text-[#6f5c0d]">
-          <strong className="block text-[#171c18]">Vault in DRAFT — Initial Seed Required</strong>
-          <p className="mt-1 text-[#717b72]">
-            This vault is deployed on-chain but needs an initial seed deposit (min 10 USDC) to become active.
-          </p>
-          <button
-            type="button"
-            onClick={onSeed}
-            disabled={busy}
-            className="folio-button-primary mt-2 min-h-0 px-3 py-1 text-[11px]"
-          >
-            {action === 'approving' ? 'Preparing…' : action === 'seeding' ? 'Seeding Vault…' : 'Deposit 10 USDC Seed →'}
-          </button>
-        </div>
-      )}
-
-      {vault.state === 'SEEDED' && (
-        <div className="mt-4 border-l-2 border-[#b18b15] pl-3 text-[11px] leading-5 text-[#6f5c0d]">
-          <strong className="block text-[#171c18]">Waiting for Guardian activation</strong>
-          <p className="mt-1 text-[#717b72]">
-            Initial deposit received! Manager trading remains locked until <code>activate()</code> is confirmed.
-          </p>
-          {managerAllowed && (
-            <button
-              type="button"
-              onClick={onActivate}
-              disabled={busy}
-              className="folio-button-primary mt-2 min-h-0 px-3 py-1 text-[11px]"
-            >
-              {action === 'activating' ? 'Activating…' : 'Activate Vault (Guardian) →'}
-            </button>
-          )}
-        </div>
-      )}
-
-      {!managerAllowed && (
-        <p className="mt-4 border-l-2 border-[#a14343] pl-3 text-[11px] leading-5 text-[#8f3e3e]">
-          Manager actions are disabled for this wallet.
-        </p>
-      )}
-    </div>
-  );
-}
 
 function TabButton({active, onClick, children}: {active: boolean; onClick: () => void; children: React.ReactNode}) { return <button type="button" onClick={onClick} className="folio-segment" data-active={active}>{children}</button>; }
 function MobileToggle({active, onClick, children}: {active: boolean; onClick: () => void; children: React.ReactNode}) { return <button type="button" onClick={onClick} className="folio-segment" data-active={active}>{children}</button>; }
