@@ -31,9 +31,8 @@ export function isRateLimited(error: unknown): boolean {
   return /\b429\b|rate limit/i.test(errorText(error));
 }
 
-/** True when an error means the RPC could not be reached, not that a read failed. */
 export function isChainDown(error: unknown): boolean {
-  return isRateLimited(error) || /fetch failed|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|socket hang up|failed to get/i.test(errorText(error));
+  return isRateLimited(error) || /fetch failed|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|socket hang up|failed to get|520|525|502|503|504|Cloudflare/i.test(errorText(error));
 }
 
 function chainDownMessage(error: unknown): string {
@@ -47,7 +46,10 @@ export function vaultReadError(error: unknown, address: string): ApiError {
 
 let cached: Connection | undefined;
 export function connection(): Connection {
-  cached ??= new Connection(process.env.SOLANA_RPC_URL || PUBLIC_RPC_URL, 'confirmed');
+  cached ??= new Connection(process.env.SOLANA_RPC_URL || PUBLIC_RPC_URL, {
+    commitment: 'confirmed',
+    wsEndpoint: '',
+  });
   return cached;
 }
 

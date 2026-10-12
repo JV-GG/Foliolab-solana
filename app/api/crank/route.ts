@@ -54,11 +54,13 @@ export async function POST(request: Request) {
 
     const keeper = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(secretKeyRaw)));
     const force = body.force === true;
-    const result = await executeRebalanceCrank(vaultParam, keeper, force);
+    const customTargets = Array.isArray(body.targets) ? body.targets : undefined;
+    const result = await executeRebalanceCrank(vaultParam, keeper, force, customTargets);
 
     return Response.json({
       ok: true,
       trades: result.trades,
+      message: result.message,
     });
   } catch (error) {
     return errorResponse(error, 'api/crank');

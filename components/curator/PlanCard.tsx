@@ -4,7 +4,8 @@ import {useState, useMemo} from 'react';
 import {PublicKey} from '@solana/web3.js';
 import {useNotify} from '@/components/Toast';
 import {explainError, useOnChainTokens, type VaultView} from '@/lib/contracts/hooks';
-import {deployment} from '@/lib/solana/config';
+import type {TargetWeight} from '@/lib/vaults/read';
+import {deployment, tokenByMint} from '@/lib/solana/config';
 import {formatSol} from '@/lib/domain/format';
 import {MAX_PLAN_BYTES, utf8ByteLength} from './model';
 import {useCuratorActions} from './useCuratorActions';
@@ -102,7 +103,18 @@ export function PlanCard({vault, managerAllowed}: Props) {
     setRebalanceError(null);
     setRebalancePending(true);
     try {
-      const res = await forceRebalance(vault);
+      const customTargetsList: TargetWeight[] = Object.entries(weights)
+        .filter(([, pct]) => Number(pct) > 0)
+        .map(([asset, pct]) => {
+          const info = tokenByMint(asset);
+          return {
+            asset,
+            symbol: info?.symbol ?? `${asset.slice(0, 4)}…${asset.slice(-4)}`,
+            targetBps: Math.round(Number(pct) * 100),
+            targetPercent: Number(pct),
+          };
+        });
+      const res = await forceRebalance(vault, customTargetsList.length > 0 ? customTargetsList : undefined);
       const count = res.trades?.length ?? 1;
       notify(`Full portfolio rebalance complete! ${count} trades executed to match target weights.`);
     } catch (caught) {

@@ -135,6 +135,32 @@ export function evaluateRebalance(
   };
 }
 
+async function waitForTxConfirmation(
+  conn: Connection,
+  sig: string,
+  lastValidBlockHeight: number,
+  maxWaitMs: number = 30000,
+): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    const status = await conn.getSignatureStatus(sig);
+    if (status?.value?.err) {
+      throw new ApiError(`Transaction failed on-chain: ${JSON.stringify(status.value.err)}`, 400);
+    }
+    if (
+      status?.value?.confirmationStatus === 'confirmed' ||
+      status?.value?.confirmationStatus === 'finalized'
+    ) {
+      return;
+    }
+    const currentBlockHeight = await conn.getBlockHeight('confirmed').catch(() => 0);
+    if (currentBlockHeight > lastValidBlockHeight) {
+      throw new ApiError('Transaction expired before confirmation', 408);
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
+
 async function sendRebalanceTx(
   conn: Connection,
   keeper: Keypair,
@@ -142,6 +168,8 @@ async function sendRebalanceTx(
   altAddress?: string,
 ): Promise<string> {
   const bh = await conn.getLatestBlockhash('confirmed');
+  let txToSimulate: VersionedTransaction | Transaction;
+
   if (altAddress) {
     const altAccount = (await conn.getAddressLookupTable(new PublicKey(altAddress))).value;
     if (altAccount) {
@@ -152,25 +180,67 @@ async function sendRebalanceTx(
       }).compileToV0Message([altAccount]);
       const txV0 = new VersionedTransaction(messageV0);
       txV0.sign([keeper]);
-      try {
-        const sig = await conn.sendTransaction(txV0);
-        await conn.confirmTransaction({signature: sig, ...bh}, 'confirmed');
-        return sig;
-      } catch (sendErr: any) {
-        const logs = sendErr?.logs || sendErr?.transactionLogs;
-        if (logs && Array.isArray(logs)) {
-          const revertMsg = logs.find((l: string) => l.includes('Error Message:'));
-          if (revertMsg) {
-            throw new Error(`Rebalance transaction reverted: ${revertMsg.replace(/^.*Error Message:\s*/, '')}`);
-          }
-        }
-        throw sendErr;
-      }
+      txToSimulate = txV0;
+    } else {
+      const tx = new Transaction().add(...instructions);
+      tx.recentBlockhash = bh.blockhash;
+      tx.feePayer = keeper.publicKey;
+      tx.sign(keeper);
+      txToSimulate = tx;
     }
+  } else {
+    const tx = new Transaction().add(...instructions);
+    tx.recentBlockhash = bh.blockhash;
+    tx.feePayer = keeper.publicKey;
+    tx.sign(keeper);
+    txToSimulate = tx;
   }
 
-  const tx = new Transaction().add(...instructions);
-  return await sendAndConfirmTransaction(conn, tx, [keeper], {commitment: 'confirmed'});
+  // Pre-simulate locally to detect on-chain contract reverts with clear messages
+  const sim = await conn.simulateTransaction(txToSimulate as any);
+  if (sim.value.err) {
+    const logs = sim.value.logs ?? [];
+    const revertMsg = logs.find((l) => l.includes('Error Message:'));
+    if (revertMsg) {
+      const cleanMsg = revertMsg.replace(/^.*Error Message:\s*/, '').trim();
+      if (cleanMsg.includes('RebalanceTooSoon') || cleanMsg.includes('last 12 hours')) {
+        throw new ApiError(
+          'Rebalance cycle cooldown active: On-chain rules require 12 hours between autonomous keeper cycles. The vault manager can execute manual rebalancing directly via connected wallet.',
+          429,
+        );
+      }
+      throw new ApiError(`Rebalance transaction reverted: ${cleanMsg}`, 400);
+    }
+    throw new ApiError(`Simulation failed: ${JSON.stringify(sim.value.err)}`, 400);
+  }
+
+  try {
+    let sig: string;
+    if (txToSimulate instanceof VersionedTransaction) {
+      sig = await conn.sendTransaction(txToSimulate, {skipPreflight: true});
+    } else {
+      sig = await conn.sendRawTransaction(txToSimulate.serialize(), {skipPreflight: true});
+    }
+    await waitForTxConfirmation(conn, sig, bh.lastValidBlockHeight);
+    return sig;
+  } catch (sendErr: any) {
+    if (sendErr instanceof ApiError) throw sendErr;
+    const logs = sendErr?.logs || sendErr?.transactionLogs;
+    if (logs && Array.isArray(logs)) {
+      const revertMsg = logs.find((l: string) => l.includes('Error Message:'));
+      if (revertMsg) {
+        const cleanMsg = revertMsg.replace(/^.*Error Message:\s*/, '').trim();
+        if (cleanMsg.includes('RebalanceTooSoon') || cleanMsg.includes('last 12 hours')) {
+          throw new ApiError(
+            'Rebalance cycle cooldown active: On-chain rules require 12 hours between autonomous keeper cycles. The vault manager can execute manual rebalancing directly via connected wallet.',
+            429,
+          );
+        }
+        throw new ApiError(`Rebalance transaction reverted: ${cleanMsg}`, 400);
+      }
+    }
+    throw sendErr;
+  }
 }
 
 export interface CrankTradeResult {
@@ -187,7 +257,8 @@ export async function executeRebalanceCrank(
   vaultAddress: string,
   keeper: Keypair,
   force: boolean = false,
-): Promise<{trades: CrankTradeResult[]}> {
+  customTargets?: TargetWeight[],
+): Promise<{trades: CrankTradeResult[]; message?: string}> {
   const conn = connection();
   const vaultPubkey = parseKey(vaultAddress, 'vault');
   const d = deployment();
@@ -197,7 +268,7 @@ export async function executeRebalanceCrank(
   // Save gas fees: rebalance the most significant drifts and avoid wasting transactions on dust
   for (let step = 0; step < 2; step++) {
     const vaultView = await readVault(vaultAddress);
-    const rec = evaluateRebalance(vaultView, force || step > 0);
+    const rec = evaluateRebalance(vaultView, force || step > 0, customTargets);
     if (!rec.eligible || !rec.overweightAsset || !rec.underweightAsset || !rec.suggestedSellAmount) {
       break;
     }
@@ -274,7 +345,10 @@ export async function executeRebalanceCrank(
   }
 
   if (executedTrades.length === 0) {
-    throw new ApiError('Vault does not require rebalancing (all assets are within target weights)', 400);
+    return {
+      trades: [],
+      message: 'Vault does not require rebalancing (all assets are within target weights)',
+    };
   }
 
   return {trades: executedTrades};

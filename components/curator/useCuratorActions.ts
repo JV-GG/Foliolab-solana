@@ -383,10 +383,13 @@ export function useCuratorActions() {
           const crankRes = await fetch('/api/crank', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({vault: vault.address, force: true}),
+            body: JSON.stringify({vault: vault.address, force: true, targets: customTargets}),
           });
           const crankData = await crankRes.json().catch(() => ({}));
           if (crankRes.ok && crankData.ok) {
+            if (!crankData.trades || crankData.trades.length === 0) {
+              throw new Error(crankData.message || 'All assets are already balanced at their target weights.');
+            }
             onStage?.('confirmed');
             await refresh();
             return {
@@ -395,7 +398,10 @@ export function useCuratorActions() {
               simulatedBought: BigInt(0),
               trades: crankData.trades || [],
             };
-          } else if (crankData.error && (crankData.error.includes('within target weights') || crankData.error.includes('already balanced'))) {
+          } else if (
+            (crankData.error && (crankData.error.includes('within target weights') || crankData.error.includes('already balanced'))) ||
+            (crankData.message && (crankData.message.includes('within target weights') || crankData.message.includes('already balanced')))
+          ) {
             throw new Error('All assets are already balanced at their target weights.');
           }
         } catch (crankErr: any) {
