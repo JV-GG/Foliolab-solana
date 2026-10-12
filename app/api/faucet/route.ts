@@ -1,11 +1,12 @@
 /**
  * POST /api/faucet  {account: <base58>} — devnet/localnet only.
  *
- * Returns a transaction that creates the wallet's mock-USDC account if needed and mints it
- * FAUCET_AMOUNT mock USDC. The server signs as the mint authority (FAUCET_SECRET_KEY); the wallet
- * pays the fee and signs last, so the faucet key needs no SOL. Refused on mainnet.
+ * Mints FAUCET_AMOUNT mock USDC to the wallet, creating its USDC account if needed. The server signs
+ * and pays as the mint authority (FAUCET_SECRET_KEY, which needs a little SOL), so the user's wallet
+ * is not involved: wallets such as Phantom edit transactions before sending, which would void a
+ * server signature. Refused on mainnet.
  */
-import {Keypair, Transaction} from '@solana/web3.js';
+import {Keypair, Transaction, sendAndConfirmTransaction} from '@solana/web3.js';
 import {createAssociatedTokenAccountIdempotentInstruction, createMintToInstruction, TOKEN_PROGRAM_ID} from '@solana/spl-token';
 import {ApiError, connection, errorResponse, parseKey} from '@/lib/chain/server';
 import {CLUSTER, deployment} from '@/lib/solana/config';
@@ -25,14 +26,15 @@ export async function POST(request: Request) {
     const target = ata(account, usdc, TOKEN_PROGRAM_ID);
 
     const conn = connection();
-    const {blockhash, lastValidBlockHeight} = await conn.getLatestBlockhash('confirmed');
-    const tx = new Transaction({feePayer: account, blockhash, lastValidBlockHeight}).add(
-      createAssociatedTokenAccountIdempotentInstruction(account, target, account, usdc, TOKEN_PROGRAM_ID),
+    if ((await conn.getBalance(faucet.publicKey)) < 5_000_000) {
+      throw new ApiError('The test-USDC faucet is out of devnet SOL for fees. Ask the team to top it up.', 503);
+    }
+    const tx = new Transaction().add(
+      createAssociatedTokenAccountIdempotentInstruction(faucet.publicKey, target, account, usdc, TOKEN_PROGRAM_ID),
       createMintToInstruction(usdc, target, faucet.publicKey, FAUCET_AMOUNT, [], TOKEN_PROGRAM_ID),
     );
-    tx.partialSign(faucet);
-    const serialized = tx.serialize({requireAllSignatures: false}).toString('base64');
-    return Response.json({transaction: serialized, amount: FAUCET_AMOUNT.toString()}, {headers: {'Cache-Control': 'no-store'}});
+    const signature = await sendAndConfirmTransaction(conn, tx, [faucet], {commitment: 'confirmed'});
+    return Response.json({signature, amount: FAUCET_AMOUNT.toString()}, {headers: {'Cache-Control': 'no-store'}});
   } catch (error) {
     return errorResponse(error, 'api/faucet');
   }

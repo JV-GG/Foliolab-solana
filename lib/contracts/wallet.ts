@@ -45,7 +45,7 @@ export function useConnection(): {address: string | undefined; isConnected: bool
  */
 export function useSendTransaction() {
   const {connection} = useSolanaConnection();
-  const {publicKey, signTransaction, sendTransaction} = useWallet();
+  const {publicKey, sendTransaction} = useWallet();
 
   return useCallback(
     async (input: TransactionInstruction[] | Transaction, signers: Signer[] = []): Promise<string> => {
@@ -53,37 +53,26 @@ export function useSendTransaction() {
       const {blockhash, lastValidBlockHeight} = await connection.getLatestBlockhash('confirmed');
       let tx: Transaction;
       if (input instanceof Transaction) {
-        tx = input; // already has its blockhash and any server signature
+        tx = input; // already has its blockhash
       } else {
         tx = new Transaction({feePayer: publicKey, blockhash, lastValidBlockHeight}).add(...input);
         if (signers.length) tx.partialSign(...signers);
       }
-      let signature: string;
-      let validUntil = tx.lastValidBlockHeight ?? lastValidBlockHeight;
-      if (signTransaction) {
-        // Sign in the wallet, send through our RPC. Phantom's own send edits the transaction (it adds
-        // instructions), which voids a server's partial signature (the faucet), and it reports any
-        // simulation failure only as "Unexpected error". Sending ourselves keeps the real program error.
-        const signed = await signTransaction(tx);
-        if (signed.recentBlockhash !== tx.recentBlockhash) {
-          // The wallet swapped in a newer blockhash from its own RPC; it stays valid ~150 blocks from now.
-          validUntil = (await connection.getBlockHeight('confirmed')) + 150;
-        }
-        const raw = signed.serialize();
-        try {
-          signature = await connection.sendRawTransaction(raw, {preflightCommitment: 'confirmed'});
-        } catch (error) {
-          // A blockhash newer than the simulating RPC node has seen fails preflight but is valid on the
-          // network. Send without the preflight; confirmation below still reports a real failure.
-          if (!/blockhash not found/i.test(String((error as Error)?.message))) throw error;
-          signature = await connection.sendRawTransaction(raw, {skipPreflight: true, maxRetries: 5});
-        }
-      } else {
-        signature = await sendTransaction(tx, connection, {preflightCommitment: 'confirmed'});
+      // Simulate first on our RPC: a program error then surfaces with its real reason, instead of the
+      // wallet's generic "Unexpected error".
+      const simulation = await connection.simulateTransaction(tx);
+      if (simulation.value.err) {
+        const failure = new Error(`Simulation failed: ${JSON.stringify(simulation.value.err)}`) as Error & {logs?: string[]};
+        failure.logs = simulation.value.logs ?? [];
+        throw failure;
       }
+      // The wallet sends. (Signing in the wallet and sending ourselves produced transactions that never
+      // landed on devnet with Phantom, so this keeps the wallet's own, proven send path.)
+      const signature = await sendTransaction(tx, connection, {preflightCommitment: 'confirmed'});
+      const validUntil = tx.lastValidBlockHeight ?? lastValidBlockHeight;
       await waitForConfirmation(connection, signature, validUntil);
       return signature;
     },
-    [connection, publicKey, signTransaction, sendTransaction],
+    [connection, publicKey, sendTransaction],
   );
 }

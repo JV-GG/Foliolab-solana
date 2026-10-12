@@ -83,17 +83,13 @@ async function main() {
   }
   console.log(`investor ${investor.publicKey.toBase58()}`);
 
-  // 1. Faucet: server partially signs as mint authority, wallet signs and pays.
-  const faucet = await api<{transaction: string}>('/api/faucet', {
+  // 1. Faucet: the server mints and pays; the wallet signs nothing.
+  const faucet = await api<{signature: string}>('/api/faucet', {
     method: 'POST',
     headers: {'content-type': 'application/json'},
     body: JSON.stringify({account: investor.publicKey.toBase58()}),
   });
-  const ftx = Transaction.from(Buffer.from(faucet.transaction, 'base64'));
-  ftx.partialSign(investor);
-  const faucetSig = await connection.sendRawTransaction(ftx.serialize());
-  await connection.confirmTransaction(faucetSig, 'confirmed');
-  link('faucet', faucetSig);
+  link('faucet', faucet.signature);
   console.log('faucet ok:', (await connection.getTokenAccountBalance(ata(investor.publicKey, usdc, TOKEN_PROGRAM_ID))).value.uiAmountString, 'USDC');
 
   // 2. Deposit 50 USDC with fresh signed prices.

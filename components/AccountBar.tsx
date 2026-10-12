@@ -1,16 +1,14 @@
 'use client';
 
-import {Transaction} from '@solana/web3.js';
 import {money} from '@/lib/domain/format';
 import {useTokenBalance, type VaultView} from '@/lib/contracts/hooks';
-import {appChainLabel, isTestCluster, useConnection, useSendTransaction} from '@/lib/contracts/wallet';
+import {appChainLabel, isTestCluster, useConnection} from '@/lib/contracts/wallet';
 import {deployment} from '@/lib/solana/config';
 import {useNotify} from './Toast';
 
 export function AccountBar({vaults}: {vaults: VaultView[]}) {
   const {address} = useConnection();
   const notify = useNotify();
-  const send = useSendTransaction();
   const usdc = isTestCluster ? deployment().usdc : undefined;
   const balance = useTokenBalance(usdc);
 
@@ -21,14 +19,13 @@ export function AccountBar({vaults}: {vaults: VaultView[]}) {
     : null;
   const total = cash !== null && invested !== null ? cash + invested : null;
 
-  /** The server signs a mint of mock USDC as its authority; the wallet pays the fee and sends it. */
+  /** The server mints mock USDC to the wallet and pays the fee; nothing to sign. */
   async function faucet() {
     if (!address) return;
     try {
       const res = await fetch('/api/faucet', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({account: address})});
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? 'Faucet unavailable');
-      await send(Transaction.from(Buffer.from(body.transaction, 'base64')));
       await balance.refetch();
       notify('1,000 test USDC added to your wallet.');
     } catch (error) {
