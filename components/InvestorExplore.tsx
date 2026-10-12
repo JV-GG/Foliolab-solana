@@ -41,7 +41,16 @@ export function InvestorExplore() {
 
         {error ? <Notice title="Vault data unavailable" detail={error.message} /> : isLoading ? <Notice title="Reading the archipelago" detail="Loading current vaults, holdings and connected-wallet positions…" /> : !vaults.length ? <Notice title="No vaults yet" detail="No curator vaults are visible on this network." /> : view === 'map' ? (
           <div className="mt-6 grid gap-7 lg:grid-cols-[minmax(0,1fr)_300px]">
-            <div className="map-frame flex h-[520px] min-h-0 sm:h-[620px] lg:h-[680px]">
+            <div
+              className="map-frame flex h-[520px] min-h-0 sm:h-[620px] lg:h-[680px]"
+              onPointerDownCapture={(event) => {
+                const target = event.target;
+                if (!(target instanceof Element)) return;
+                const island = target.closest('[data-vault-address]');
+                const vaultAddress = island?.getAttribute('data-vault-address');
+                if (vaultAddress) setSelectedAddress(vaultAddress);
+              }}
+            >
               <AssetMap vaults={vaults} selectedAddress={selected?.address ?? null} connectedAddress={address} onSelect={setSelectedAddress} />
             </div>
             {selected && <SelectedVault vault={selected} />}
