@@ -23,6 +23,7 @@ export interface Deployment {
   faucet: string;
   tokens: TokenInfo[];
   vaults: string[];
+  lookupTable?: string;
 }
 
 export const CLUSTER = (process.env.NEXT_PUBLIC_SOLANA_CLUSTER ?? 'devnet') as Cluster;

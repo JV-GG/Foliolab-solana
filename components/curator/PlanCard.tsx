@@ -66,7 +66,8 @@ export function PlanCard({vault, managerAllowed}: Props) {
     setRebalancePending(true);
     try {
       const res = await forceRebalance(vault);
-      notify(`Forced rebalance executed! Signature: ${res.hash.slice(0, 8)}…`);
+      const count = res.trades?.length ?? 1;
+      notify(`Full portfolio rebalance complete! ${count} trades executed to match target weights.`);
     } catch (caught) {
       const message = explainError(caught);
       setRebalanceError(message);

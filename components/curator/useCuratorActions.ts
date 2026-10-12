@@ -41,6 +41,7 @@ export interface RebalanceResult {
   hash: string;
   simulatedSold: bigint;
   simulatedBought: bigint;
+  trades?: {signature: string; sellAmount: string; buyMint: string; symbol?: string}[];
 }
 
 const SYSVAR_INSTRUCTIONS = new PublicKey('Sysvar1nstructions1111111111111111111111111');
@@ -369,37 +370,31 @@ export function useCuratorActions() {
       setAction('simulating');
       onStage?.('simulating');
       try {
-        const crankRes = await fetch(`/api/crank?vault=${vault.address}&force=true`);
-        const crankData = await crankRes.json();
-        const rec = crankData.recommendation;
-        if (!rec || !rec.overweightAsset || !rec.underweightAsset || !rec.suggestedSellAmount) {
-          throw new Error(rec?.reason || 'Portfolio is already balanced within target weights.');
+        const crankRes = await fetch('/api/crank', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({vault: vault.address, force: true}),
+        });
+
+        if (crankRes.ok) {
+          const data = await crankRes.json();
+          const trades = data.trades ?? [];
+          await refresh();
+          return {
+            hash: trades[trades.length - 1]?.signature || '',
+            simulatedSold: BigInt(0),
+            simulatedBought: BigInt(0),
+            trades,
+          };
         }
 
-        const quoteRes = await fetch(
-          `/api/trade?vault=${vault.address}&sell=${rec.overweightAsset}&buy=${rec.underweightAsset}&amount=${rec.suggestedSellAmount}&slippage=1`,
-        );
-        if (!quoteRes.ok) {
-          const body = await quoteRes.json().catch(() => null);
-          throw new Error(body?.error || 'Failed to fetch swap route');
-        }
-        const quoteData = await quoteRes.json();
-
-        const pricesRes = await fetch(
-          `/api/prices?vault=${vault.address}&include=${rec.underweightAsset}`,
-        );
-        if (!pricesRes.ok) {
-          const body = await pricesRes.json().catch(() => null);
-          throw new Error(body?.error || 'Failed to fetch signed prices');
-        }
-        const pricesData = await pricesRes.json();
-
-        return await executeRebalance(vault.address, quoteData, pricesData, onStage);
+        const errorBody = await crankRes.json().catch(() => null);
+        throw new Error(errorBody?.error || 'Failed to execute keeper rebalance cycle');
       } finally {
         setAction('idle');
       }
     },
-    [executeRebalance],
+    [refresh],
   );
 
   return {

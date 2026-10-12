@@ -1,11 +1,26 @@
-import {Keypair, PublicKey, sendAndConfirmTransaction, Transaction, ComputeBudgetProgram} from '@solana/web3.js';
+import {
+  Keypair,
+  PublicKey,
+  sendAndConfirmTransaction,
+  Transaction,
+  ComputeBudgetProgram,
+  Connection,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+  SystemProgram,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
+} from '@solana/web3.js';
+import {ASSOCIATED_TOKEN_PROGRAM_ID} from '@solana/spl-token';
 import {ApiError, connection, parseKey} from '@/lib/chain/server';
 import {readVault, type VaultView} from '@/lib/vaults/read';
 import {buildTrade, REBALANCE_COMPUTE_UNITS} from '@/lib/trade/build';
 import {formatSol} from '@/lib/domain/format';
 import {signPricesForVault} from '@/lib/pricing/signer';
+import {deployment} from '@/lib/solana/config';
 import {
   BN,
+  ata,
   folioProgram,
   heldAccounts,
   priceSignatureIx,
@@ -106,70 +121,136 @@ export function evaluateRebalance(vault: VaultView, ignoreCooldown: boolean = fa
   };
 }
 
-/**
- * Executes a keeper-cranked rebalance transaction.
- */
-export async function executeRebalanceCrank(vaultAddress: string, keeper: Keypair): Promise<{signature: string; sellAmount: string; buyMint: string}> {
-  const conn = connection();
-  const vaultPubkey = parseKey(vaultAddress, 'vault');
-  const vaultView = await readVault(vaultAddress);
-  const rec = evaluateRebalance(vaultView);
-
-  if (!rec.eligible || !rec.overweightAsset || !rec.underweightAsset || !rec.suggestedSellAmount) {
-    throw new ApiError(rec.reason ?? 'Vault does not require rebalancing at this time', 400);
+async function sendRebalanceTx(
+  conn: Connection,
+  keeper: Keypair,
+  instructions: TransactionInstruction[],
+  altAddress?: string,
+): Promise<string> {
+  const bh = await conn.getLatestBlockhash('confirmed');
+  if (altAddress) {
+    try {
+      const altAccount = (await conn.getAddressLookupTable(new PublicKey(altAddress))).value;
+      if (altAccount) {
+        const messageV0 = new TransactionMessage({
+          payerKey: keeper.publicKey,
+          recentBlockhash: bh.blockhash,
+          instructions,
+        }).compileToV0Message([altAccount]);
+        const txV0 = new VersionedTransaction(messageV0);
+        txV0.sign([keeper]);
+        const sig = await conn.sendTransaction(txV0);
+        await conn.confirmTransaction({signature: sig, ...bh}, 'confirmed');
+        return sig;
+      }
+    } catch {
+      // Fallback to legacy
+    }
   }
 
-  const built = await buildTrade({
-    vault: vaultAddress,
-    sell: rec.overweightAsset,
-    buy: rec.underweightAsset,
-    amount: rec.suggestedSellAmount,
-    slippage: '1',
-  });
+  const tx = new Transaction().add(...instructions);
+  return await sendAndConfirmTransaction(conn, tx, [keeper], {commitment: 'confirmed'});
+}
 
-  const program = folioProgram(conn);
-  const v = await program.account.vault.fetch(vaultPubkey);
-  const registry = registryPda();
-  const pricesJson = await signPricesForVault(vaultAddress, [rec.underweightAsset]);
-  const priceArg = toPriceArg(pricesJson.update);
-  const tokenPrograms = await tokenProgramsOf(conn, v.held);
-  const heldMetas = heldAccounts(vaultPubkey, v.held, tokenPrograms);
+export interface CrankTradeResult {
+  signature: string;
+  sellAmount: string;
+  buyMint: string;
+  symbol?: string;
+}
 
-  const routeMetas = built.trade.routeAccounts.map((a) => ({
-    pubkey: new PublicKey(a.pubkey),
-    isSigner: false,
-    isWritable: a.isWritable,
-  }));
+/**
+ * Executes a keeper-cranked rebalance cycle, rebalancing all assets according to percentage.
+ */
+export async function executeRebalanceCrank(
+  vaultAddress: string,
+  keeper: Keypair,
+  force: boolean = false,
+): Promise<{trades: CrankTradeResult[]}> {
+  const conn = connection();
+  const vaultPubkey = parseKey(vaultAddress, 'vault');
+  const d = deployment();
+  const altAddress = d.lookupTable;
+  const executedTrades: CrankTradeResult[] = [];
 
-  const remaining = [...heldMetas, ...routeMetas];
+  // Iterate to rebalance each underweight asset until the entire index portfolio is balanced
+  for (let step = 0; step < 8; step++) {
+    const vaultView = await readVault(vaultAddress);
+    const rec = evaluateRebalance(vaultView, force || step > 0);
+    if (!rec.eligible || !rec.overweightAsset || !rec.underweightAsset || !rec.suggestedSellAmount) {
+      break;
+    }
 
-  const rebalanceIx = await program.methods
-    .rebalance(
-      new BN(built.trade.maxSell),
-      new BN(built.trade.minBuy),
-      Buffer.from(built.trade.routeData, 'base64'),
-      priceArg,
-    )
-    .accountsPartial({
-      keeper: keeper.publicKey,
-      vault: vaultPubkey,
-      router: new PublicKey(built.trade.router),
-      sellMint: new PublicKey(rec.overweightAsset),
-      buyMint: new PublicKey(rec.underweightAsset),
-    })
-    .remainingAccounts(remaining)
-    .instruction();
+    const built = await buildTrade({
+      vault: vaultAddress,
+      sell: rec.overweightAsset,
+      buy: rec.underweightAsset,
+      amount: rec.suggestedSellAmount,
+      slippage: '1',
+    });
 
-  const tx = new Transaction();
-  tx.add(ComputeBudgetProgram.setComputeUnitLimit({units: REBALANCE_COMPUTE_UNITS}));
-  tx.add(priceSignatureIx(pricesJson));
-  tx.add(rebalanceIx);
+    const sell = new PublicKey(rec.overweightAsset);
+    const buy = new PublicKey(rec.underweightAsset);
+    const program = folioProgram(conn);
+    const v = await program.account.vault.fetch(vaultPubkey);
+    const pricesJson = await signPricesForVault(vaultAddress, [rec.underweightAsset]);
+    const priceArg = toPriceArg(pricesJson.update);
+    const tokenPrograms = await tokenProgramsOf(conn, [...v.held, buy]);
+    const sellProgram = tokenPrograms.get(sell.toBase58())!;
+    const buyProgram = tokenPrograms.get(buy.toBase58())!;
+    const heldMetas = heldAccounts(vaultPubkey, v.held, tokenPrograms);
 
-  const signature = await sendAndConfirmTransaction(conn, tx, [keeper], {commitment: 'confirmed'});
+    const routeMetas = built.trade.routeAccounts.map((a) => ({
+      pubkey: new PublicKey(a.pubkey),
+      isSigner: false,
+      isWritable: a.isWritable,
+    }));
 
-  return {
-    signature,
-    sellAmount: built.trade.maxSell,
-    buyMint: rec.underweightAsset,
-  };
+    const remaining = [...heldMetas, ...routeMetas];
+
+    const rebalanceIx = await program.methods
+      .rebalance(
+        new BN(built.trade.maxSell),
+        new BN(built.trade.minBuy),
+        Buffer.from(built.trade.routeData, 'base64'),
+        priceArg,
+      )
+      .accountsPartial({
+        keeper: keeper.publicKey,
+        registry: registryPda(),
+        vault: vaultPubkey,
+        router: new PublicKey(built.trade.router),
+        sellMint: sell,
+        buyMint: buy,
+        vaultSell: ata(vaultPubkey, sell, sellProgram),
+        vaultBuy: ata(vaultPubkey, buy, buyProgram),
+        sellTokenProgram: sellProgram,
+        buyTokenProgram: buyProgram,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+        instructions: SYSVAR_INSTRUCTIONS_PUBKEY,
+      })
+      .remainingAccounts(remaining)
+      .instruction();
+
+    const instructions = [
+      ComputeBudgetProgram.setComputeUnitLimit({units: REBALANCE_COMPUTE_UNITS}),
+      priceSignatureIx(pricesJson),
+      rebalanceIx,
+    ];
+
+    const signature = await sendRebalanceTx(conn, keeper, instructions, altAddress);
+    executedTrades.push({
+      signature,
+      sellAmount: built.trade.maxSell,
+      buyMint: rec.underweightAsset,
+      symbol: rec.underweightSymbol,
+    });
+  }
+
+  if (executedTrades.length === 0) {
+    throw new ApiError('Vault does not require rebalancing (all assets are within target weights)', 400);
+  }
+
+  return {trades: executedTrades};
 }

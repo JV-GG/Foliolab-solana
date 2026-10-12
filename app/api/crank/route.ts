@@ -46,13 +46,12 @@ export async function POST(request: Request) {
     }
 
     const keeper = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(secretKeyRaw)));
-    const result = await executeRebalanceCrank(vaultParam, keeper);
+    const force = body.force === true;
+    const result = await executeRebalanceCrank(vaultParam, keeper, force);
 
     return Response.json({
       ok: true,
-      signature: result.signature,
-      sellAmount: result.sellAmount,
-      buyMint: result.buyMint,
+      trades: result.trades,
     });
   } catch (error) {
     return errorResponse(error, 'api/crank');
