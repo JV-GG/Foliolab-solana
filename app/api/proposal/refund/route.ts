@@ -15,7 +15,7 @@ import {
 import {ApiError, connection, errorResponse, parseKey} from '@/lib/chain/server';
 import {folioProgram} from '@/lib/solana/program';
 
-import {isProposalClosed, markProposalClosed} from '@/lib/vaults/proposals';
+import {isProposalClosed, markProposalClosed, adoptProposalStrategy} from '@/lib/vaults/proposals';
 
 function getRefundSponsor(): Keypair {
   const secretKeyRaw = (process.env.KEEPER_SECRET_KEY || process.env.GUARDIAN_SECRET_KEY || process.env.FAUCET_SECRET_KEY)?.trim();
@@ -28,7 +28,7 @@ function getRefundSponsor(): Keypair {
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const {vault: vaultAddress, curator: curatorAddress, proposalId} = body;
+    const {vault: vaultAddress, curator: curatorAddress, proposalId, approved, targets, plan} = body;
 
     if (!vaultAddress) {
       throw new ApiError('Missing { vault } in JSON body', 400);
@@ -67,6 +67,9 @@ export async function POST(request: Request) {
     );
 
     const signature = await sendAndConfirmTransaction(conn, tx, [sponsor], {commitment: 'confirmed'});
+    if (approved && targets && Array.isArray(targets) && targets.length > 0) {
+      adoptProposalStrategy(vaultAddress, targets, plan);
+    }
     markProposalClosed(vaultAddress, proposalId);
 
     return Response.json({

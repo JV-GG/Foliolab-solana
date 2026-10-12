@@ -18,12 +18,19 @@ export async function GET(request: Request) {
 
   try {
     const force = url.searchParams.get('force') === 'true';
+    const targetsParam = url.searchParams.get('targets');
+    let customTargets = undefined;
+    if (targetsParam) {
+      try {
+        customTargets = JSON.parse(targetsParam);
+      } catch {}
+    }
     const vault = await readVault(vaultParam);
-    const recommendation = evaluateRebalance(vault, force);
+    const recommendation = evaluateRebalance(vault, force, customTargets);
     return Response.json({
       vault: vault.address,
       state: vault.state,
-      targets: vault.targets,
+      targets: customTargets ?? vault.targets,
       gasTankLamports: vault.gasTankLamports,
       recommendation,
     });

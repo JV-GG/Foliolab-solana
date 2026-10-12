@@ -13,7 +13,7 @@ import {
 } from '@solana/web3.js';
 import {ASSOCIATED_TOKEN_PROGRAM_ID} from '@solana/spl-token';
 import {ApiError, connection, parseKey} from '@/lib/chain/server';
-import {readVault, type VaultView} from '@/lib/vaults/read';
+import {readVault, type VaultView, type TargetWeight} from '@/lib/vaults/read';
 import {buildTrade, REBALANCE_COMPUTE_UNITS} from '@/lib/trade/build';
 import {formatSol} from '@/lib/domain/format';
 import {signPricesForVault} from '@/lib/pricing/signer';
@@ -45,11 +45,16 @@ export interface RebalanceRecommendation {
 /**
  * Calculates drift against target weights and identifies the optimal trade to rebalance.
  */
-export function evaluateRebalance(vault: VaultView, ignoreCooldown: boolean = false): RebalanceRecommendation {
+export function evaluateRebalance(
+  vault: VaultView,
+  ignoreCooldown: boolean = false,
+  customTargets?: TargetWeight[],
+): RebalanceRecommendation {
   if (vault.state !== 'ACTIVE') {
     return {eligible: false, reason: `Vault is ${vault.state}, not ACTIVE`};
   }
-  if (!vault.targets || vault.targets.length === 0) {
+  const targets = (customTargets && customTargets.length > 0) ? customTargets : vault.targets;
+  if (!targets || targets.length === 0) {
     return {eligible: false, reason: 'No target weights configured'};
   }
   if (!ignoreCooldown && Number(vault.gasTankLamports) < KEEPER_FEE_LAMPORTS) {
@@ -74,7 +79,7 @@ export function evaluateRebalance(vault: VaultView, ignoreCooldown: boolean = fa
   let mostUnderweight = {asset: '', symbol: '', driftBps: 0, deficitUsd: 0};
   const threshold = ignoreCooldown ? 0 : DRIFT_BAND_BPS;
 
-  for (const target of vault.targets) {
+  for (const target of targets) {
     const holding = vault.holdings.find((h) => h.asset === target.asset);
     const valueUsd = holding?.valueUsd ? Number(holding.valueUsd) : 0;
     const currentBps = Math.floor((valueUsd / totalValue) * 10000);

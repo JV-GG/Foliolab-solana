@@ -21,7 +21,7 @@ import {
   REBALANCE_INTERVAL_SECONDS,
 } from '@/lib/solana/program';
 import {tokenByMint} from '@/lib/solana/config';
-import {isProposalClosed} from '@/lib/vaults/proposals';
+import {isProposalClosed, getAdoptedStrategy} from '@/lib/vaults/proposals';
 
 export const VAULT_STATES = ['DRAFT', 'SEEDED', 'ACTIVE', 'PAUSED', 'CLOSED'] as const;
 /** Shares use the settlement token's decimals (USDC: 6). */
@@ -170,8 +170,9 @@ export async function readVault(vaultParam: string, account?: PublicKey, prices?
     };
   }
 
-  // V2 Strategy targets
-  const targets: TargetWeight[] = (v.targets ?? []).map((t) => {
+  // V2 Strategy targets (incorporates adopted amendment if approved)
+  const adopted = getAdoptedStrategy(address.toBase58());
+  const targets: TargetWeight[] = adopted?.targets ?? (v.targets ?? []).map((t) => {
     const asset = t.mint.toBase58();
     const info = tokenByMint(asset);
     return {
@@ -279,7 +280,9 @@ export async function readVault(vaultParam: string, account?: PublicKey, prices?
     holdings,
     totalValueUsd: total === null ? null : String(total),
     sharePriceUsd: sharePrice === null ? null : String(sharePrice),
-    plan: toPlan(v.plan, BigInt(v.planVersion.toString())),
+    plan: adopted?.plan
+      ? {version: v.planVersion.toNumber() + 1, text: adopted.plan}
+      : toPlan(v.plan, BigInt(v.planVersion.toString())),
     position,
     pricedAt: Date.now(),
     gasTankLamports: v.gasTank ? v.gasTank.toString() : '0',

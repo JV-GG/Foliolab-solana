@@ -70,3 +70,52 @@ export function isProposalClosed(vault: string, proposalId?: number | string | n
   );
 }
 
+export interface StrategyOverride {
+  targets: Array<{
+    asset: string;
+    symbol: string;
+    targetBps: number;
+    targetPercent: number;
+  }>;
+  plan?: string;
+  timestamp: number;
+}
+
+const STRATEGY_FILE = path.join(process.cwd(), '.vault-strategies.json');
+
+function readPersistedStrategies(): Record<string, StrategyOverride> {
+  try {
+    if (fs.existsSync(STRATEGY_FILE)) {
+      return JSON.parse(fs.readFileSync(STRATEGY_FILE, 'utf-8'));
+    }
+  } catch {}
+  return {};
+}
+
+function writePersistedStrategies(data: Record<string, StrategyOverride>): void {
+  try {
+    fs.writeFileSync(STRATEGY_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  } catch {}
+}
+
+export function adoptProposalStrategy(
+  vault: string,
+  targets: Array<{asset: string; symbol: string; targetBps: number; targetPercent: number}>,
+  plan?: string,
+): void {
+  const v = vault.toLowerCase();
+  const disk = readPersistedStrategies();
+  disk[v] = {
+    targets,
+    plan,
+    timestamp: Date.now(),
+  };
+  writePersistedStrategies(disk);
+}
+
+export function getAdoptedStrategy(vault: string): StrategyOverride | null {
+  const v = vault.toLowerCase();
+  const disk = readPersistedStrategies();
+  return disk[v] ?? null;
+}
+

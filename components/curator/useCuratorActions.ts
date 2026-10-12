@@ -22,7 +22,7 @@ import {
   vaultPda,
 } from '@/lib/solana/program';
 import type {SignedPrices, TradeQuote} from './model';
-import type {VaultView} from '@/lib/vaults/read';
+import type {VaultView, TargetWeight} from '@/lib/vaults/read';
 
 export type CuratorAction =
   | 'idle'
@@ -370,6 +370,7 @@ export function useCuratorActions() {
   const forceRebalance = useCallback(
     async (
       vault: VaultView,
+      customTargets?: TargetWeight[],
       onStage?: (stage: RebalanceStage) => void,
     ): Promise<RebalanceResult> => {
       const keeper = requireWallet();
@@ -382,8 +383,11 @@ export function useCuratorActions() {
         const instructionSets: TransactionInstruction[][] = [];
         const tradeMetadata: {sellAmount: string; buyMint: string; symbol?: string}[] = [];
 
-        // 1. Fetch current rebalance recommendation
-        const crankCheckRes = await fetch(`/api/crank?vault=${vault.address}&force=true`, {cache: 'no-store'});
+        // 1. Fetch current rebalance recommendation (using customTargets if provided)
+        const targetsQuery = customTargets && customTargets.length > 0
+          ? `&targets=${encodeURIComponent(JSON.stringify(customTargets))}`
+          : '';
+        const crankCheckRes = await fetch(`/api/crank?vault=${vault.address}&force=true${targetsQuery}`, {cache: 'no-store'});
         if (!crankCheckRes.ok) {
           const err = await crankCheckRes.json().catch(() => ({}));
           throw new Error(err.error || 'Failed to check vault rebalance status');

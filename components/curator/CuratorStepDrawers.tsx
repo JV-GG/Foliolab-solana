@@ -144,6 +144,7 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
   const [showProposeModal, setShowProposeModal] = useState(false);
   const [rebalancePending, setRebalancePending] = useState(false);
   const [rebalanceError, setRebalanceError] = useState<string | null>(null);
+  const [concludingVote, setConcludingVote] = useState(false);
 
   const bytes = utf8ByteLength(text);
   const validLength = bytes >= 1 && bytes <= MAX_PLAN_BYTES;
@@ -210,6 +211,77 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
     } catch (caught) {
       const message = explainError(caught);
       notify(message);
+    }
+  }
+
+  async function handleConcludeByVote(approved: boolean) {
+    if (!activeProposal || !managerAllowed || concludingVote) return;
+    setConcludingVote(true);
+    setRebalanceError(null);
+    try {
+      if (approved) {
+        // Adopt new strategy & execute rebalance to new targets
+        const targets = activeProposal.targets;
+        const plan = activeProposal.planText;
+
+        await fetch('/api/proposal/refund', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            vault: vault.address,
+            curator: vault.manager,
+            proposalId: activeProposal.id,
+            approved: true,
+            targets,
+            plan,
+          }),
+        });
+
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(`folio_closed_proposal_${vault.address}`, String(activeProposal.id));
+          localStorage.removeItem(`folio_has_proposal_${vault.address}`);
+          if (targets) {
+            localStorage.setItem(`folio_vault_adopted_targets_${vault.address}`, JSON.stringify(targets));
+          }
+        }
+        setIsProposalClosedLocally(true);
+
+        try {
+          await forceRebalance(vault, targets);
+        } catch (rebErr) {
+          console.warn('Post-approval rebalance note:', rebErr);
+        }
+
+        notify(`Proposal #${activeProposal.id} Approved! New strategy adopted, rebalanced, and 0.05 SOL bond refunded.`);
+      } else {
+        // Reject: retain current strategy and refund bond
+        await fetch('/api/proposal/refund', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            vault: vault.address,
+            curator: vault.manager,
+            proposalId: activeProposal.id,
+            approved: false,
+          }),
+        });
+
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(`folio_closed_proposal_${vault.address}`, String(activeProposal.id));
+          localStorage.removeItem(`folio_has_proposal_${vault.address}`);
+        }
+        setIsProposalClosedLocally(true);
+
+        notify(`Proposal #${activeProposal.id} Rejected. Existing strategy retained, 0.05 SOL bond refunded to curator.`);
+      }
+
+      void queryClient.invalidateQueries({queryKey: [VAULTS_KEY]});
+      router.refresh();
+    } catch (caught) {
+      const message = explainError(caught);
+      notify(message);
+    } finally {
+      setConcludingVote(false);
     }
   }
 
@@ -597,32 +669,89 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                 ) : (
                   <div className="w-full space-y-2">
                     {activeProposal ? (
-                      <div className="rounded-lg border border-[#c2b280] bg-[#fffbf0] p-2.5 text-[11px] text-[#7a6b32]">
+                      <div className="rounded-lg border border-[#c2b280] bg-[#fffbf0] p-3 text-[11px] text-[#7a6b32]">
                         <div className="flex items-center justify-between font-bold">
-                          <span>Governance Proposal #{activeProposal.id}</span>
-                          <span className="font-mono text-[10px] uppercase">{activeProposal.status}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span>Governance Proposal #{activeProposal.id}</span>
+                            <span
+                              className={`rounded px-1.5 py-0.5 text-[9px] uppercase font-bold ${
+                                activeProposal.hasPassed
+                                  ? 'bg-[#237b68] text-white'
+                                  : 'bg-[#c2b280]/40 text-[#5c4f22]'
+                              }`}
+                            >
+                              {activeProposal.hasPassed ? 'Passed (Approved)' : 'In Voting'}
+                            </span>
+                          </div>
+                          <span className="font-mono text-[10px]">Bond: {formatSol(activeProposal.bondLamports)}</span>
                         </div>
-                        <p className="mt-1 text-[10px] text-[#6b746c]">
-                          Bond attached: {formatSol(activeProposal.bondLamports)}. You can force rebalancing now or conclude this proposal to immediately refund the bond to your wallet and close the voting panel.
-                        </p>
-                        <div className="mt-2 flex gap-2">
+
+                        {/* Live Vote Progress Bar */}
+                        <div className="mt-2 space-y-1 rounded-md bg-white/60 p-2">
+                          <div className="flex justify-between text-[10px] font-bold">
+                            <span className="text-[#237b68]">YES: {activeProposal.yesPercent.toFixed(1)}%</span>
+                            <span className="text-[#a14343]">NO: {activeProposal.noPercent.toFixed(1)}%</span>
+                          </div>
+                          <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#e3e6df]">
+                            <div
+                              className="h-full bg-[#237b68] transition-all"
+                              style={{width: `${Math.min(100, Math.max(0, activeProposal.yesPercent))}%`}}
+                            />
+                          </div>
+                          <div className="flex justify-between text-[9px] text-[#717b72]">
+                            <span>Quorum: {activeProposal.quorumReached ? '✓ Met (≥20%)' : 'Pending (<20%)'}</span>
+                            <span>
+                              Current Verdict:{' '}
+                              <strong className={activeProposal.hasPassed ? 'text-[#237b68]' : 'text-[#a14343]'}>
+                                {activeProposal.hasPassed ? 'Approved' : 'Not Approved'}
+                              </strong>
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Proposed Targets Preview */}
+                        {activeProposal.targets && activeProposal.targets.length > 0 && (
+                          <div className="mt-2 rounded bg-white/70 p-1.5 text-[10px]">
+                            <span className="font-bold text-[#455248]">Proposed Weights: </span>
+                            {activeProposal.targets.map((t) => `${t.symbol}: ${t.targetPercent}%`).join(', ')}
+                          </div>
+                        )}
+
+                        {/* Decision actions */}
+                        <div className="mt-3 space-y-2">
                           <button
                             type="button"
-                            onClick={() => void handleForceRebalance()}
-                            disabled={rebalancePending}
-                            className="folio-button-primary flex-1 py-2 text-[11px]"
+                            onClick={() => void handleConcludeByVote(activeProposal.hasPassed)}
+                            disabled={concludingVote || rebalancePending}
+                            className="folio-button-primary w-full py-2 text-[11px] font-bold shadow-xs flex items-center justify-center gap-1.5"
                           >
-                            {rebalancePending ? 'Executing Rebalance…' : '⚡ Force Rebalance Now'}
+                            {concludingVote
+                              ? 'Concluding & Executing…'
+                              : activeProposal.hasPassed
+                              ? '⚡ Stop Voting & Apply Approved Strategy (Rebalance + Refund)'
+                              : '⚡ Stop Voting & Conclude as Rejected (Keep Strategy + Refund)'}
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleRefundProposal()}
-                            disabled={rebalancePending}
-                            className="rounded-lg border border-[#c2b280] bg-[#fffbf0] px-3 py-2 text-[11px] font-bold text-[#7a6b32] hover:bg-[#faedd0] transition"
-                            title="Conclude voting and refund 0.05 SOL bond immediately"
-                          >
-                            Conclude & Refund
-                          </button>
+
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void handleConcludeByVote(true)}
+                              disabled={concludingVote || rebalancePending}
+                              className="flex-1 rounded-lg border border-[#237b68] bg-[#f0f7f4] py-1.5 text-[10px] font-bold text-[#237b68] hover:bg-[#e1f0ea] transition"
+                              title="Force approve and execute new strategy regardless of current vote count"
+                            >
+                              Force Approve & Apply
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleConcludeByVote(false)}
+                              disabled={concludingVote || rebalancePending}
+                              className="flex-1 rounded-lg border border-[#c2b280] bg-[#fffbf0] py-1.5 text-[10px] font-bold text-[#7a6b32] hover:bg-[#faedd0] transition"
+                              title="Reject proposal, retain current strategy, and refund 0.05 SOL bond"
+                            >
+                              Reject & Refund
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ) : (
