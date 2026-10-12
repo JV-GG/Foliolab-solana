@@ -45,7 +45,7 @@ export function CuratorConsole({artSample = false}: {artSample?: boolean} = {}) 
           <MobileToggle active={mobileView === 'map'} onClick={() => setMobileView('map')}>Capital map</MobileToggle>
         </div>
 
-        <div className="grid min-h-[680px] gap-6 md:grid-cols-[370px_minmax(0,1fr)]">
+        <div className="grid min-h-[680px] items-start gap-6 md:grid-cols-[370px_minmax(0,1fr)]">
           <aside className={`${mobileView === 'controls' ? 'flex' : 'hidden'} flex-col border border-[#c2c9c0] bg-[#f7f8f3]/60 md:flex`}>
             <div className="border-b border-[#cdd3ca] p-4">
               <VaultPicker connected={isConnected} managed={managed} selected={selected} loading={isLoading} refreshing={isFetching} error={error instanceof Error ? error.message : null} onSelect={(next) => { setSelectedAddress(next); setManagerTab('plan'); }} onRefresh={() => void refetch()} />
@@ -80,7 +80,7 @@ export function CuratorConsole({artSample = false}: {artSample?: boolean} = {}) 
             </div>
           </aside>
 
-          <section className={`${mobileView === 'map' ? 'flex' : 'hidden'} map-frame relative h-[620px] flex-col md:flex md:h-auto md:min-h-[680px]`}>
+          <section className={`${mobileView === 'map' ? 'flex' : 'hidden'} map-frame relative h-[680px] md:h-[680px] md:sticky md:top-24 flex-col overflow-hidden`}>
             <AssetMap vaults={managed} selectedAddress={selected?.address ?? null} connectedAddress={address} artSample={artSample} onSelect={(vault) => { setSelectedAddress(vault); setMobileView('controls'); }} />
             {selected && <ActivityStrip vaultName={selected.name} vaultAddress={selected.address} onOpen={() => { setManagerTab('activity'); setMobileView('controls'); }} />}
           </section>

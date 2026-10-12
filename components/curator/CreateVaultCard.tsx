@@ -1,8 +1,8 @@
 'use client';
 
-import {useState, type FormEvent} from 'react';
+import {useState, useEffect, useMemo, type FormEvent} from 'react';
 import {useNotify} from '@/components/Toast';
-import {explainError} from '@/lib/contracts/hooks';
+import {explainError, useOnChainTokens} from '@/lib/contracts/hooks';
 import type {CuratorAction} from './useCuratorActions';
 
 interface Props {
@@ -21,9 +21,28 @@ const ACTION_LABEL: Partial<Record<CuratorAction, string>> = {
 
 export function CreateVaultCard({connected, deploymentReady, action, onCreate, onCreated}: Props) {
   const notify = useNotify();
+  const {data: allTokens = []} = useOnChainTokens();
   const [name, setName] = useState('');
   const [symbol, setSymbol] = useState('');
   const [seed, setSeed] = useState('10');
+
+  // Filter on-chain allowlisted RWA tokens (excluding USDC settlement currency)
+  const rwaTokens = useMemo(() => allTokens.filter((t) => t.symbol !== 'USDC'), [allTokens]);
+  const [selectedMints, setSelectedMints] = useState<string[]>([]);
+
+  // Default selection: all on-chain RWA tokens
+  useEffect(() => {
+    if (rwaTokens.length > 0 && selectedMints.length === 0) {
+      setSelectedMints(rwaTokens.map((t) => t.mint));
+    }
+  }, [rwaTokens, selectedMints.length]);
+
+  function toggleMint(mint: string) {
+    setSelectedMints((prev) =>
+      prev.includes(mint) ? prev.filter((m) => m !== mint) : [...prev, mint],
+    );
+  }
+
   const busy = action === 'creating' || action === 'approving' || action === 'seeding';
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -33,14 +52,18 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
     if (cleanName.length < 2) return notify('Give the vault a name of at least two characters.');
     if (!/^[A-Z0-9]{2,8}$/.test(cleanSymbol)) return notify('Use a 2–8 character symbol made from letters and numbers.');
     if (!/^\d+(\.\d+)?$/.test(seed) || Number(seed) < 10) return notify('The first deposit must be at least 10 USDC.');
+    if (selectedMints.length === 0) return notify('Select at least one RWA stock token for your vault portfolio.');
 
     try {
       const vault = await onCreate(cleanName, cleanSymbol, seed);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(`folio_vault_selected_assets_${vault}`, JSON.stringify(selectedMints));
+      }
       setName('');
       setSymbol('');
       setSeed('10');
       onCreated(vault);
-      notify('Vault created and seeded. It is waiting for Guardian activation.');
+      notify('Vault created and seeded with chosen RWA tokens. It is waiting for Guardian activation.');
     } catch (error) {
       notify(explainError(error));
     }
@@ -98,9 +121,65 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
             Minimum 10 USDC seed. You receive the initial 100% share of the vault.
           </span>
         </label>
+        {/* On-chain RWA Asset Selection */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#59645c]">
+              Portfolio RWA Tokens (On-Chain)
+            </span>
+            <span className="font-mono text-[10px] font-semibold text-[#237b68]">
+              {selectedMints.length} of {rwaTokens.length} selected
+            </span>
+          </div>
+          <p className="text-[11px] leading-relaxed text-[#6b746c]">
+            Select which allowlisted stock tokens will form the investment universe for this vault.
+          </p>
+
+          <div className="grid gap-2">
+            {rwaTokens.map((token) => {
+              const isSelected = selectedMints.includes(token.mint);
+              return (
+                <div
+                  key={token.mint}
+                  onClick={() => !busy && toggleMint(token.mint)}
+                  className={`flex cursor-pointer items-center justify-between rounded-xl border p-2.5 transition select-none ${
+                    isSelected
+                      ? 'border-[#237b68] bg-[#f0f7f4] shadow-xs'
+                      : 'border-[#dde2dc] bg-white opacity-60 hover:opacity-100'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      disabled={busy}
+                      onChange={() => toggleMint(token.mint)}
+                      className="h-4 w-4 rounded accent-[#237b68]"
+                    />
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <strong className="font-mono text-xs text-[#2b3a30]">{token.symbol}</strong>
+                        {token.underlying && (
+                          <span className="rounded bg-[#e8ece7] px-1 py-0.2 font-mono text-[9px] text-[#59645c]">
+                            {token.underlying}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-[#717b72]">{token.name}</div>
+                    </div>
+                  </div>
+                  <span className="font-mono text-[10px] text-[#6b746c]">
+                    {isSelected ? '✓ Included' : 'Excluded'}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         <button
           type="submit"
-          disabled={!connected || !deploymentReady || busy}
+          disabled={!connected || !deploymentReady || busy || selectedMints.length === 0}
           className="folio-button-primary mt-2 w-full"
         >
           {!connected ? 'Connect Manager Wallet' : !deploymentReady ? 'Deployment Addresses Pending' : ACTION_LABEL[action] ?? 'Create & Seed Vault'}

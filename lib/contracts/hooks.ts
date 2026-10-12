@@ -31,12 +31,57 @@ import {
   type SignedPricesJson,
 } from '@/lib/solana/program';
 import folioIdl from '@/lib/solana/idl/folio_vault.json';
+import {deployment, type TokenInfo} from '@/lib/solana/config';
 import {useConnection, useSendTransaction} from './wallet';
 
 export type {VaultView, Holding} from '@/lib/vaults/read';
 
 export const VAULTS_KEY = 'vaults';
 const SYSVAR_INSTRUCTIONS = new PublicKey('Sysvar1nstructions1111111111111111111111111');
+
+/** Fetches allowlisted RWA tokens directly from the Solana registry on-chain. */
+export function useOnChainTokens() {
+  const {connection} = useSolanaConnection();
+  return useQuery({
+    queryKey: ['onchain-tokens'],
+    queryFn: async (): Promise<TokenInfo[]> => {
+      try {
+        const program = folioProgram(connection);
+        const reg = await program.account.registry.fetch(registryPda());
+        const localTokens = deployment().tokens;
+        const results: TokenInfo[] = [];
+
+        // Settlement mint (USDC)
+        const usdcInfo = localTokens.find((t) => t.mint === reg.settlementMint.toBase58()) ?? {
+          symbol: 'USDC',
+          name: 'USD Coin (settlement)',
+          mint: reg.settlementMint.toBase58(),
+          decimals: 6,
+        };
+        results.push(usdcInfo);
+
+        // All allowlisted RWA tokens from chain registry
+        for (const assetPk of reg.assets) {
+          const mintStr = assetPk.toBase58();
+          const info = localTokens.find((t) => t.mint === mintStr) ?? {
+            symbol: `${mintStr.slice(0, 4)}…x`,
+            name: `Tokenized Asset (${mintStr.slice(0, 6)}…)`,
+            mint: mintStr,
+            decimals: 8,
+          };
+          if (!results.some((r) => r.mint === info.mint)) {
+            results.push(info);
+          }
+        }
+        return results;
+      } catch (err) {
+        console.warn('Failed to fetch on-chain tokens from registry, fallback to config:', err);
+        return deployment().tokens;
+      }
+    },
+    staleTime: 60_000,
+  });
+}
 
 /** All vaults, with the connected wallet's position in each. Refreshes every 15 s. */
 export function useVaults() {

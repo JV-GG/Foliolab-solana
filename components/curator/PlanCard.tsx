@@ -3,7 +3,7 @@
 import {useState, useMemo} from 'react';
 import {PublicKey} from '@solana/web3.js';
 import {useNotify} from '@/components/Toast';
-import {explainError, type VaultView} from '@/lib/contracts/hooks';
+import {explainError, useOnChainTokens, type VaultView} from '@/lib/contracts/hooks';
 import {deployment} from '@/lib/solana/config';
 import {formatSol} from '@/lib/domain/format';
 import {MAX_PLAN_BYTES, utf8ByteLength} from './model';
@@ -18,34 +18,66 @@ export function PlanCard({vault, managerAllowed}: Props) {
   const notify = useNotify();
   const {action, setStrategy, proposeStrategy, fundGas, forceRebalance} = useCuratorActions();
 
+  // Fetch tokens from on-chain registry allowlist
+  const {data: onChainTokens = []} = useOnChainTokens();
   const tokens = useMemo(() => {
+    if (onChainTokens.length > 0) return onChainTokens;
     try {
       return deployment().tokens;
     } catch {
       return [];
     }
-  }, []);
+  }, [onChainTokens]);
 
-  // Initialize target weights from vault.targets or defaults
+  // Initialize target weights from vault.targets or stored curator choices
   const initialWeights = useMemo(() => {
     const map: Record<string, number> = {};
     if (vault.targets && vault.targets.length > 0) {
       for (const t of vault.targets) {
         map[t.asset] = t.targetPercent;
       }
-    } else {
-      // Default: 40% USDC, 30% AAPLx, 30% NVDAx (or equal split)
-      const usdc = tokens.find((t) => t.symbol === 'USDC');
-      const aapl = tokens.find((t) => t.symbol === 'AAPLx');
-      const nvda = tokens.find((t) => t.symbol === 'NVDAx');
-      if (usdc && aapl && nvda) {
-        map[usdc.mint] = 40;
-        map[aapl.mint] = 30;
-        map[nvda.mint] = 30;
+      return map;
+    }
+
+    if (tokens.length === 0) return map;
+
+    let selectedMints: string[] | null = null;
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(`folio_vault_selected_assets_${vault.address}`);
+        if (stored) selectedMints = JSON.parse(stored);
+      } catch {
+        // ignore
       }
     }
+
+    const usdc = tokens.find((t) => t.symbol === 'USDC');
+    const rwaTokens = tokens.filter((t) => t.symbol !== 'USDC');
+    const activeRwas = selectedMints
+      ? rwaTokens.filter((t) => selectedMints!.includes(t.mint))
+      : rwaTokens;
+
+    if (activeRwas.length === 0) {
+      if (usdc) map[usdc.mint] = 100;
+      return map;
+    }
+
+    const baseUsdcPct = 20;
+    if (usdc) map[usdc.mint] = baseUsdcPct;
+
+    const remaining = 100 - (usdc ? baseUsdcPct : 0);
+    const perRwa = Math.floor(remaining / activeRwas.length);
+    let distributed = 0;
+
+    activeRwas.forEach((rwa, idx) => {
+      const isLast = idx === activeRwas.length - 1;
+      const weight = isLast ? remaining - distributed : perRwa;
+      map[rwa.mint] = weight;
+      distributed += weight;
+    });
+
     return map;
-  }, [vault.targets, tokens]);
+  }, [vault.targets, vault.address, tokens]);
 
   const [text, setText] = useState(vault.plan?.text ?? '');
   const [weights, setWeights] = useState<Record<string, number>>(initialWeights);
@@ -229,47 +261,113 @@ export function PlanCard({vault, managerAllowed}: Props) {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#59645c]">
-            Target Asset Weights
+            Target Asset Weights (Max 100% Total)
           </label>
-          <span
-            className={`font-mono text-[11px] font-semibold ${
-              validWeights ? 'text-[#237b68]' : 'text-[#a14343]'
-            }`}
+          <div className="flex items-center gap-2">
+            <span
+              className={`font-mono text-[11px] font-semibold ${
+                validWeights ? 'text-[#237b68]' : 'text-[#6b746c]'
+              }`}
+            >
+              Total: {totalPercent}% / 100% {validWeights ? '✓' : `(${100 - totalPercent}% free)`}
+            </span>
+            {totalPercent < 100 && (
+              <button
+                type="button"
+                disabled={!managerAllowed || publishing || (isActive && !showProposeModal)}
+                onClick={() => {
+                  const remaining = 100 - totalPercent;
+                  const usdc = tokens.find((t) => t.symbol === 'USDC') ?? tokens[0];
+                  if (usdc) {
+                    setWeights((prev) => ({...prev, [usdc.mint]: (prev[usdc.mint] || 0) + remaining}));
+                  }
+                }}
+                className="font-mono text-[10px] font-bold text-[#237b68] underline hover:text-[#175245]"
+              >
+                + Auto Fill
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between text-[10px] text-[#717b72]">
+          <span>Adjust weights within remaining 0–100% headroom.</span>
+          <button
+            type="button"
+            disabled={!managerAllowed || publishing || (isActive && !showProposeModal)}
+            onClick={() => {
+              if (tokens.length === 0) return;
+              const perToken = Math.floor(100 / tokens.length);
+              const rem = 100 - (perToken * tokens.length);
+              const next: Record<string, number> = {};
+              tokens.forEach((t, i) => {
+                next[t.mint] = perToken + (i === 0 ? rem : 0);
+              });
+              setWeights(next);
+            }}
+            className="font-medium text-[#237b68] hover:underline"
           >
-            Total: {totalPercent}% / 100%
-          </span>
+            Equally balance all ({tokens.length})
+          </button>
         </div>
 
         <div className="grid gap-2">
           {tokens.map((token) => {
             const currentVal = weights[token.mint] ?? 0;
+            const otherSum = tokens.reduce((sum, t) => {
+              if (t.mint === token.mint) return sum;
+              return sum + (Number(weights[t.mint]) || 0);
+            }, 0);
+            const maxAllowed = Math.max(0, 100 - otherSum);
             const disabled = !managerAllowed || publishing || (isActive && !showProposeModal);
+
             return (
               <div
                 key={token.mint}
-                className="flex items-center justify-between gap-3 rounded-lg border border-[#dde2dc] bg-white p-2.5"
+                className="rounded-lg border border-[#dde2dc] bg-white p-2.5 shadow-xs"
               >
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs font-semibold text-[#2b3a30]">
-                    {token.symbol}
-                  </span>
-                  <span className="text-[11px] text-[#717b72]">{token.name}</span>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs font-semibold text-[#2b3a30]">
+                      {token.symbol}
+                    </span>
+                    <span className="text-[11px] text-[#717b72]">{token.name}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="0"
+                      max={maxAllowed}
+                      step="1"
+                      disabled={disabled}
+                      value={currentVal}
+                      onChange={(e) => {
+                        const raw = Number(e.target.value) || 0;
+                        const clamped = Math.min(maxAllowed, Math.max(0, raw));
+                        setWeights((prev) => ({...prev, [token.mint]: clamped}));
+                      }}
+                      className="w-16 rounded border border-[#cdd3ca] px-2 py-1 text-right font-mono text-xs font-medium text-[#2b3a30] focus:border-[#237b68] focus:outline-none disabled:bg-[#f2f4f1]"
+                    />
+                    <span className="text-xs text-[#717b72]">%</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="1"
-                    disabled={disabled}
-                    value={currentVal}
-                    onChange={(e) => {
-                      const val = Number(e.target.value) || 0;
-                      setWeights((prev) => ({...prev, [token.mint]: val}));
-                    }}
-                    className="w-16 rounded border border-[#cdd3ca] px-2 py-1 text-right font-mono text-xs font-medium text-[#2b3a30] focus:border-[#237b68] focus:outline-none disabled:bg-[#f2f4f1]"
-                  />
-                  <span className="text-xs text-[#717b72]">%</span>
+                <input
+                  type="range"
+                  min="0"
+                  max={maxAllowed}
+                  step="1"
+                  value={Math.min(currentVal, maxAllowed)}
+                  disabled={disabled}
+                  onChange={(e) => {
+                    const raw = Number(e.target.value) || 0;
+                    const clamped = Math.min(maxAllowed, Math.max(0, raw));
+                    setWeights((prev) => ({...prev, [token.mint]: clamped}));
+                  }}
+                  className="mt-2 h-1 w-full accent-[#237b68]"
+                />
+                <div className="mt-0.5 flex items-center justify-between text-[9px] text-[#849087]">
+                  <span>0%</span>
+                  <span>Max allowed: {maxAllowed}%</span>
                 </div>
               </div>
             );

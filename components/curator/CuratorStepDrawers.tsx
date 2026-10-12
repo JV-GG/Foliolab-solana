@@ -3,7 +3,7 @@
 import {useState, useMemo} from 'react';
 import {PublicKey} from '@solana/web3.js';
 import {useNotify} from '@/components/Toast';
-import {explainError, type VaultView} from '@/lib/contracts/hooks';
+import {explainError, useOnChainTokens, type VaultView} from '@/lib/contracts/hooks';
 import {deployment, explorerUrl} from '@/lib/solana/config';
 import {formatSol, tokenAmount} from '@/lib/domain/format';
 import {MAX_PLAN_BYTES, utf8ByteLength} from './model';
@@ -56,35 +56,68 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
     }));
   };
 
+  // Fetch tokens from on-chain registry allowlist
+  const {data: onChainTokens = []} = useOnChainTokens();
   const tokens = useMemo(() => {
+    if (onChainTokens.length > 0) return onChainTokens;
     try {
       return deployment().tokens;
     } catch {
       return [];
     }
-  }, []);
+  }, [onChainTokens]);
 
-  // Target weights initialization
+  // Target weights initialization: honor on-chain targets or curator-selected assets
   const initialWeights = useMemo(() => {
     const map: Record<string, number> = {};
     if (vault.targets && vault.targets.length > 0) {
       for (const t of vault.targets) {
         map[t.asset] = t.targetPercent;
       }
-    } else {
-      const usdc = tokens.find((t) => t.symbol === 'USDC');
-      const aapl = tokens.find((t) => t.symbol === 'AAPLx');
-      const nvda = tokens.find((t) => t.symbol === 'NVDAx');
-      const tsla = tokens.find((t) => t.symbol === 'TSLAx');
-      if (usdc && aapl && nvda && tsla) {
-        map[usdc.mint] = 20;
-        map[aapl.mint] = 25;
-        map[nvda.mint] = 25;
-        map[tsla.mint] = 30;
+      return map;
+    }
+
+    if (tokens.length === 0) return map;
+
+    // Check if curator pre-selected specific assets when creating vault
+    let selectedMints: string[] | null = null;
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(`folio_vault_selected_assets_${vault.address}`);
+        if (stored) selectedMints = JSON.parse(stored);
+      } catch {
+        // ignore
       }
     }
+
+    const usdc = tokens.find((t) => t.symbol === 'USDC');
+    const rwaTokens = tokens.filter((t) => t.symbol !== 'USDC');
+    const activeRwas = selectedMints
+      ? rwaTokens.filter((t) => selectedMints!.includes(t.mint))
+      : rwaTokens;
+
+    if (activeRwas.length === 0) {
+      if (usdc) map[usdc.mint] = 100;
+      return map;
+    }
+
+    // Allocate 20% to cash USDC and split remaining 80% among active stock RWAs
+    const baseUsdcPct = 20;
+    if (usdc) map[usdc.mint] = baseUsdcPct;
+
+    const remaining = 100 - (usdc ? baseUsdcPct : 0);
+    const perRwa = Math.floor(remaining / activeRwas.length);
+    let distributed = 0;
+
+    activeRwas.forEach((rwa, idx) => {
+      const isLast = idx === activeRwas.length - 1;
+      const weight = isLast ? remaining - distributed : perRwa;
+      map[rwa.mint] = weight;
+      distributed += weight;
+    });
+
     return map;
-  }, [vault.targets, tokens]);
+  }, [vault.targets, vault.address, tokens]);
 
   const [text, setText] = useState(vault.plan?.text ?? '');
   const [weights, setWeights] = useState<Record<string, number>>(initialWeights);
@@ -386,21 +419,66 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
           <div className="space-y-4 border-t border-[#e2e6df] p-4 text-xs">
             <div className="flex items-center justify-between">
               <label className="text-[10px] font-bold uppercase tracking-wider text-[#6b746c]">
-                Target Asset Weights
+                Target Asset Weights (Max 100% Total)
               </label>
-              <span
-                className={`font-mono text-[11px] font-bold ${
-                  validWeights ? 'text-[#237b68]' : 'text-[#a14343]'
-                }`}
+              <div className="flex items-center gap-2">
+                <span
+                  className={`font-mono text-[11px] font-bold ${
+                    validWeights ? 'text-[#237b68]' : 'text-[#6b746c]'
+                  }`}
+                >
+                  Total: {totalPercent}% / 100% {validWeights ? '✓' : `(${100 - totalPercent}% free)`}
+                </span>
+                {totalPercent < 100 && (
+                  <button
+                    type="button"
+                    disabled={!managerAllowed || publishing}
+                    onClick={() => {
+                      const remaining = 100 - totalPercent;
+                      const usdc = tokens.find((t) => t.symbol === 'USDC') ?? tokens[0];
+                      if (usdc) {
+                        setWeights((prev) => ({...prev, [usdc.mint]: (prev[usdc.mint] || 0) + remaining}));
+                      }
+                    }}
+                    className="font-mono text-[10px] font-bold text-[#237b68] underline hover:text-[#175245]"
+                  >
+                    + Auto Fill
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between text-[10px] text-[#717b72]">
+              <span>Adjust weights within remaining 0–100% headroom.</span>
+              <button
+                type="button"
+                disabled={!managerAllowed || publishing}
+                onClick={() => {
+                  if (tokens.length === 0) return;
+                  const perToken = Math.floor(100 / tokens.length);
+                  const rem = 100 - (perToken * tokens.length);
+                  const next: Record<string, number> = {};
+                  tokens.forEach((t, i) => {
+                    next[t.mint] = perToken + (i === 0 ? rem : 0);
+                  });
+                  setWeights(next);
+                }}
+                className="font-medium text-[#237b68] hover:underline"
               >
-                Total: {totalPercent}% / 100%
-              </span>
+                Equally balance all ({tokens.length})
+              </button>
             </div>
 
             {/* Target Weight Sliders */}
             <div className="space-y-2.5">
               {tokens.map((token) => {
                 const currentPct = weights[token.mint] ?? 0;
+                const otherSum = tokens.reduce((sum, t) => {
+                  if (t.mint === token.mint) return sum;
+                  return sum + (Number(weights[t.mint]) || 0);
+                }, 0);
+                const maxAllowed = Math.max(0, 100 - otherSum);
+
                 return (
                   <div key={token.mint} className="rounded-lg border border-[#e2e6df] bg-white p-2.5 shadow-sm">
                     <div className="flex items-center justify-between text-[11px]">
@@ -412,13 +490,14 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                         <input
                           type="number"
                           min="0"
-                          max="100"
+                          max={maxAllowed}
                           step="1"
                           value={currentPct}
                           disabled={!managerAllowed || publishing}
                           onChange={(e) => {
-                            const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
-                            setWeights((prev) => ({...prev, [token.mint]: val}));
+                            const raw = Number(e.target.value) || 0;
+                            const clamped = Math.min(maxAllowed, Math.max(0, raw));
+                            setWeights((prev) => ({...prev, [token.mint]: clamped}));
                           }}
                           className="h-6 w-14 rounded border border-[#cdd3ca] px-1 text-right font-mono text-[11px] font-bold"
                         />
@@ -428,16 +507,21 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                     <input
                       type="range"
                       min="0"
-                      max="100"
+                      max={maxAllowed}
                       step="1"
-                      value={currentPct}
+                      value={Math.min(currentPct, maxAllowed)}
                       disabled={!managerAllowed || publishing}
                       onChange={(e) => {
-                        const val = Number(e.target.value);
-                        setWeights((prev) => ({...prev, [token.mint]: val}));
+                        const raw = Number(e.target.value) || 0;
+                        const clamped = Math.min(maxAllowed, Math.max(0, raw));
+                        setWeights((prev) => ({...prev, [token.mint]: clamped}));
                       }}
                       className="mt-2 h-1 w-full accent-[#237b68]"
                     />
+                    <div className="mt-1 flex items-center justify-between text-[9px] text-[#849087]">
+                      <span>0%</span>
+                      <span>Max allowed: {maxAllowed}%</span>
+                    </div>
                   </div>
                 );
               })}
