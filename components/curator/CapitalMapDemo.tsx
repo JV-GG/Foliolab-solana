@@ -47,6 +47,15 @@ const DEMO_VAULT: VaultView = {
   plan: {version: 1, text: 'Visual demonstration only.'},
   position: {shares: '50000000', valueUsd: '50'},
   pricedAt: 0,
+  gasTankLamports: '100000000',
+  targets: [
+    { asset: 'DKg3JGudRDDWymeLhWVEjhfagNGi93SGYdRb7A8TuHdv', symbol: 'USDC', targetBps: 4000, targetPercent: 40 },
+    { asset: 'AtVJpQjnBuhQwHFhdadj7TuNnbK2u4Aonu2wcZgGSBVJ', symbol: 'AAPLx', targetBps: 3500, targetPercent: 35 },
+    { asset: 'E87tWL7sLcD5GrpcJkewquzri9Na2sJsrV5JcLt8Ce6g', symbol: 'NVDAx', targetBps: 2500, targetPercent: 25 },
+  ],
+  openProposal: null,
+  cycleStart: 0,
+  rebalanceIntervalSeconds: 43200,
 };
 
 const DEMO_HOLDERS: MapHolder[] = [

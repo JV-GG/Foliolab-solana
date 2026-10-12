@@ -209,6 +209,11 @@ async function main() {
       await folio.methods.setGuardian(guardian.publicKey).accountsPartial({admin: admin.publicKey, registry}).instruction(),
     );
   }
+  if (!reg.keeper?.equals(admin.publicKey)) {
+    allow.push(
+      await folio.methods.setKeeper(admin.publicKey).accountsPartial({admin: admin.publicKey, registry}).instruction(),
+    );
+  }
   if (allow.length) {
     await send(allow);
     console.log(`allowlist updated (${allow.length} changes)`);
@@ -261,11 +266,26 @@ async function main() {
           systemProgram: SystemProgram.programId,
         })
         .instruction(),
-      await folio.methods.activate().accountsPartial({guardian: guardian.publicKey, registry, vault}).instruction(),
       await folio.methods
-        .setPlan('Core US big tech: about 40% Apple, 30% NVIDIA, the rest in USDC until prices settle.')
-        .accountsPartial({manager: admin.publicKey, vault})
+        .fundGas(new BN(100_000_000))
+        .accountsPartial({
+          funder: admin.publicKey,
+          vault,
+          systemProgram: SystemProgram.programId,
+        })
         .instruction(),
+      await folio.methods
+        .setStrategy(
+          'Core US big tech: 30% USDC, 40% AAPLx, 30% NVDAx index weights with autonomous rebalancing.',
+          [
+            {mint: usdc, bps: 3000},
+            {mint: new PublicKey(tokens.find((t) => t.symbol === 'AAPLx')!.mint), bps: 4000},
+            {mint: new PublicKey(tokens.find((t) => t.symbol === 'NVDAx')!.mint), bps: 3000},
+          ],
+        )
+        .accountsPartial({manager: admin.publicKey, registry, vault})
+        .instruction(),
+      await folio.methods.activate().accountsPartial({guardian: guardian.publicKey, registry, vault}).instruction(),
     ], [guardian]);
     deploymentInfo.vaults.push(vault.toBase58());
     save(deploymentInfo);
@@ -320,7 +340,7 @@ async function rebalance(
   const ix = await folio.methods
     .rebalance(new BN(amountIn.toString()), new BN(amountOut.toString()), route.data, signed.update)
     .accountsPartial({
-      manager: admin.publicKey,
+      keeper: admin.publicKey,
       registry,
       vault,
       sellMint: sell,

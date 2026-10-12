@@ -87,9 +87,11 @@ pub fn handle_deposit<'info>(
 
     let vault_key = ctx.accounts.vault.key();
     let investor_key = ctx.accounts.investor.key();
+    let open_proposal = ctx.accounts.vault.open_proposal;
     let position = &mut ctx.accounts.position;
     position.vault = vault_key;
     position.owner = investor_key;
+    position.snapshot_before_deposit(open_proposal);
     position.shares = position.shares.checked_add(shares).ok_or(FolioError::Overflow)?;
     position.bump = ctx.bumps.position;
     let vault = &mut ctx.accounts.vault;

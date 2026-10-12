@@ -122,7 +122,7 @@ export type FolioVault = {
               },
               {
                 "kind": "account",
-                "path": "registry.vaultCount",
+                "path": "registry.vault_count",
                 "account": "registry"
               }
             ]
@@ -387,6 +387,98 @@ export type FolioVault = {
       ]
     },
     {
+      "name": "execute",
+      "discriminator": [
+        130,
+        221,
+        242,
+        154,
+        13,
+        193,
+        189,
+        29
+      ],
+      "accounts": [
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "proposal"
+          ]
+        },
+        {
+          "name": "proposal",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "finalize",
+      "discriminator": [
+        171,
+        61,
+        218,
+        56,
+        127,
+        115,
+        12,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "proposal"
+          ]
+        },
+        {
+          "name": "proposal",
+          "writable": true
+        },
+        {
+          "name": "proposer",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "fundGas",
+      "discriminator": [
+        193,
+        180,
+        0,
+        111,
+        189,
+        96,
+        59,
+        88
+      ],
+      "accounts": [
+        {
+          "name": "funder",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "initializeRegistry",
       "discriminator": [
         189,
@@ -495,6 +587,114 @@ export type FolioVault = {
       "args": []
     },
     {
+      "name": "propose",
+      "discriminator": [
+        93,
+        253,
+        82,
+        168,
+        118,
+        33,
+        102,
+        90
+      ],
+      "accounts": [
+        {
+          "name": "manager",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "proposal",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  112,
+                  111,
+                  115,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "account",
+                "path": "vault.proposal_count",
+                "account": "vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "targets",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "target"
+              }
+            }
+          }
+        },
+        {
+          "name": "plan",
+          "type": "string"
+        },
+        {
+          "name": "votingDays",
+          "type": "u8"
+        },
+        {
+          "name": "bond",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "rebalance",
       "docs": [
         "remaining_accounts: first `[mint, vault_token_account]` for every held mint in `vault.held`",
@@ -512,12 +712,13 @@ export type FolioVault = {
       ],
       "accounts": [
         {
-          "name": "manager",
+          "name": "keeper",
+          "docs": [
+            "The registry's keeper. Pays the transaction and any new token account, and is paid back a",
+            "flat fee from the vault's gas tank."
+          ],
           "writable": true,
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
+          "signer": true
         },
         {
           "name": "registry",
@@ -1026,34 +1227,51 @@ export type FolioVault = {
       ]
     },
     {
-      "name": "setPlan",
+      "name": "setKeeper",
       "discriminator": [
-        200,
-        237,
-        247,
-        74,
-        57,
-        123,
-        11,
-        120
+        102,
+        94,
+        23,
+        78,
+        157,
+        222,
+        243,
+        214
       ],
       "accounts": [
         {
-          "name": "manager",
+          "name": "admin",
           "signer": true,
           "relations": [
-            "vault"
+            "registry"
           ]
         },
         {
-          "name": "vault",
-          "writable": true
+          "name": "registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          }
         }
       ],
       "args": [
         {
-          "name": "text",
-          "type": "string"
+          "name": "keeper",
+          "type": "pubkey"
         }
       ]
     },
@@ -1160,6 +1378,74 @@ export type FolioVault = {
       ]
     },
     {
+      "name": "setStrategy",
+      "docs": [
+        "Plan text and target weights. Only before activation."
+      ],
+      "discriminator": [
+        251,
+        41,
+        210,
+        173,
+        140,
+        96,
+        78,
+        235
+      ],
+      "accounts": [
+        {
+          "name": "manager",
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "text",
+          "type": "string"
+        },
+        {
+          "name": "targets",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "target"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "unpause",
       "discriminator": [
         169,
@@ -1208,6 +1494,99 @@ export type FolioVault = {
         }
       ],
       "args": []
+    },
+    {
+      "name": "vote",
+      "discriminator": [
+        227,
+        110,
+        155,
+        23,
+        136,
+        126,
+        172,
+        25
+      ],
+      "accounts": [
+        {
+          "name": "voter",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "relations": [
+            "proposal"
+          ]
+        },
+        {
+          "name": "proposal",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "account",
+                "path": "voter"
+              }
+            ]
+          }
+        },
+        {
+          "name": "voteRecord",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  111,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "proposal"
+              },
+              {
+                "kind": "account",
+                "path": "voter"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "approve",
+          "type": "bool"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -1222,6 +1601,19 @@ export type FolioVault = {
         64,
         247,
         208
+      ]
+    },
+    {
+      "name": "proposal",
+      "discriminator": [
+        26,
+        94,
+        189,
+        187,
+        116,
+        136,
+        53,
+        33
       ]
     },
     {
@@ -1249,6 +1641,19 @@ export type FolioVault = {
         117,
         119
       ]
+    },
+    {
+      "name": "voteRecord",
+      "discriminator": [
+        112,
+        9,
+        123,
+        165,
+        234,
+        9,
+        157,
+        167
+      ]
     }
   ],
   "events": [
@@ -1266,6 +1671,19 @@ export type FolioVault = {
       ]
     },
     {
+      "name": "gasFunded",
+      "discriminator": [
+        65,
+        38,
+        137,
+        46,
+        170,
+        207,
+        205,
+        73
+      ]
+    },
+    {
       "name": "planPosted",
       "discriminator": [
         12,
@@ -1276,6 +1694,32 @@ export type FolioVault = {
         241,
         25,
         40
+      ]
+    },
+    {
+      "name": "proposalCreated",
+      "discriminator": [
+        186,
+        8,
+        160,
+        108,
+        81,
+        13,
+        51,
+        206
+      ]
+    },
+    {
+      "name": "proposalFinalized",
+      "discriminator": [
+        159,
+        104,
+        210,
+        220,
+        86,
+        209,
+        61,
+        51
       ]
     },
     {
@@ -1341,6 +1785,19 @@ export type FolioVault = {
         236,
         78,
         115
+      ]
+    },
+    {
+      "name": "voteCast",
+      "discriminator": [
+        39,
+        53,
+        195,
+        104,
+        188,
+        17,
+        225,
+        213
       ]
     }
   ],
@@ -1504,6 +1961,91 @@ export type FolioVault = {
       "code": 6031,
       "name": "overflow",
       "msg": "Math overflow"
+    },
+    {
+      "code": 6032,
+      "name": "notKeeper",
+      "msg": "Only the keeper can do this"
+    },
+    {
+      "code": 6033,
+      "name": "invalidTargets",
+      "msg": "Targets must be allowlisted, distinct, above zero and sum to 100%"
+    },
+    {
+      "code": 6034,
+      "name": "strategyLocked",
+      "msg": "The strategy can only change through a passed proposal once the vault is active"
+    },
+    {
+      "code": 6035,
+      "name": "gasTankEmpty",
+      "msg": "The vault's gas tank cannot pay the keeper"
+    },
+    {
+      "code": 6036,
+      "name": "rebalanceTooSoon",
+      "msg": "A rebalance cycle already ran in the last 12 hours"
+    },
+    {
+      "code": 6037,
+      "name": "sellNotOverweight",
+      "msg": "The asset sold is not above its target weight"
+    },
+    {
+      "code": 6038,
+      "name": "buyNotUnderweight",
+      "msg": "The asset bought is not below its target weight"
+    },
+    {
+      "code": 6039,
+      "name": "targetOvershoot",
+      "msg": "The trade overshoots a target weight"
+    },
+    {
+      "code": 6040,
+      "name": "invalidVotingPeriod",
+      "msg": "Voting period must be 1-14 days"
+    },
+    {
+      "code": 6041,
+      "name": "bondTooSmall",
+      "msg": "The proposal bond is below the minimum"
+    },
+    {
+      "code": 6042,
+      "name": "proposalAlreadyOpen",
+      "msg": "This vault already has a proposal in voting or timelock"
+    },
+    {
+      "code": 6043,
+      "name": "votingClosed",
+      "msg": "Voting on this proposal is closed"
+    },
+    {
+      "code": 6044,
+      "name": "votingStillOpen",
+      "msg": "Voting is still open"
+    },
+    {
+      "code": 6045,
+      "name": "noVotingPower",
+      "msg": "No shares to vote with on this proposal"
+    },
+    {
+      "code": 6046,
+      "name": "wrongProposalStatus",
+      "msg": "The proposal is not in the right status for this"
+    },
+    {
+      "code": 6047,
+      "name": "timelockActive",
+      "msg": "The timelock has not ended"
+    },
+    {
+      "code": 6048,
+      "name": "wrongProposer",
+      "msg": "That account is not the proposer"
     }
   ],
   "types": [
@@ -1540,6 +2082,26 @@ export type FolioVault = {
       }
     },
     {
+      "name": "gasFunded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "gasTank",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "planPosted",
       "type": {
         "kind": "struct",
@@ -1555,6 +2117,16 @@ export type FolioVault = {
           {
             "name": "plan",
             "type": "string"
+          },
+          {
+            "name": "targets",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "target"
+                }
+              }
+            }
           }
         ]
       }
@@ -1582,6 +2154,20 @@ export type FolioVault = {
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "snapshotProposal",
+            "docs": [
+              "`id + 1` of the open proposal for which `snapshot_shares` was recorded, or 0."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "snapshotShares",
+            "docs": [
+              "Shares held just before the first deposit made while that proposal was open."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -1609,6 +2195,186 @@ export type FolioVault = {
           {
             "name": "timestamp",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "proposal",
+      "docs": [
+        "A curator's request to change the vault's target weights and plan."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "id",
+            "type": "u64"
+          },
+          {
+            "name": "proposer",
+            "type": "pubkey"
+          },
+          {
+            "name": "targets",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "target"
+                }
+              }
+            }
+          },
+          {
+            "name": "plan",
+            "type": "string"
+          },
+          {
+            "name": "createdAt",
+            "type": "i64"
+          },
+          {
+            "name": "votingEndsAt",
+            "type": "i64"
+          },
+          {
+            "name": "timelockEndsAt",
+            "docs": [
+              "Set when the proposal passes."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "totalShares",
+            "docs": [
+              "Vault share supply when proposed; quorum is measured against it."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "yesVotes",
+            "type": "u64"
+          },
+          {
+            "name": "noVotes",
+            "type": "u64"
+          },
+          {
+            "name": "bond",
+            "docs": [
+              "Lamports held on this account (above rent) as the curator's bond."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "proposalStatus"
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "proposalCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "proposal",
+            "type": "pubkey"
+          },
+          {
+            "name": "id",
+            "type": "u64"
+          },
+          {
+            "name": "targets",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "target"
+                }
+              }
+            }
+          },
+          {
+            "name": "plan",
+            "type": "string"
+          },
+          {
+            "name": "votingEndsAt",
+            "type": "i64"
+          },
+          {
+            "name": "bond",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "proposalFinalized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "proposal",
+            "type": "pubkey"
+          },
+          {
+            "name": "passed",
+            "type": "bool"
+          },
+          {
+            "name": "yesVotes",
+            "type": "u64"
+          },
+          {
+            "name": "noVotes",
+            "type": "u64"
+          },
+          {
+            "name": "timelockEndsAt",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "proposalStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "voting"
+          },
+          {
+            "name": "queued"
+          },
+          {
+            "name": "rejected"
+          },
+          {
+            "name": "executed"
           }
         ]
       }
@@ -1729,6 +2495,13 @@ export type FolioVault = {
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "keeper",
+            "docs": [
+              "The automation key allowed to run target-weight rebalances. Defaults to the guardian."
+            ],
+            "type": "pubkey"
           }
         ]
       }
@@ -1781,6 +2554,25 @@ export type FolioVault = {
                 "name": "vaultState"
               }
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "target",
+      "docs": [
+        "One target weight: `bps` of vault value should sit in `mint`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "bps",
+            "type": "u16"
           }
         ]
       }
@@ -1851,6 +2643,48 @@ export type FolioVault = {
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "targets",
+            "docs": [
+              "Target weights, summing to 100%. Set once before activation; afterwards only a passed",
+              "proposal changes them."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "target"
+                }
+              }
+            }
+          },
+          {
+            "name": "gasTank",
+            "docs": [
+              "Lamports held on this account (above rent) that pay the keeper for rebalances."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "cycleStart",
+            "docs": [
+              "Start of the current rebalance cycle (unix seconds); 0 means a new cycle may start now."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "proposalCount",
+            "docs": [
+              "Proposals ever made; the next proposal's id."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "openProposal",
+            "docs": [
+              "`id + 1` of the proposal in voting or timelock, or 0 if none."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -1898,6 +2732,65 @@ export type FolioVault = {
           },
           {
             "name": "closed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "voteCast",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "proposal",
+            "type": "pubkey"
+          },
+          {
+            "name": "voter",
+            "type": "pubkey"
+          },
+          {
+            "name": "approve",
+            "type": "bool"
+          },
+          {
+            "name": "weight",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "voteRecord",
+      "docs": [
+        "One holder's vote on one proposal. Its existence prevents voting twice."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposal",
+            "type": "pubkey"
+          },
+          {
+            "name": "voter",
+            "type": "pubkey"
+          },
+          {
+            "name": "approve",
+            "type": "bool"
+          },
+          {
+            "name": "weight",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }

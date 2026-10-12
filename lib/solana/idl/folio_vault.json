@@ -381,6 +381,98 @@
       ]
     },
     {
+      "name": "execute",
+      "discriminator": [
+        130,
+        221,
+        242,
+        154,
+        13,
+        193,
+        189,
+        29
+      ],
+      "accounts": [
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "proposal"
+          ]
+        },
+        {
+          "name": "proposal",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "finalize",
+      "discriminator": [
+        171,
+        61,
+        218,
+        56,
+        127,
+        115,
+        12,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "proposal"
+          ]
+        },
+        {
+          "name": "proposal",
+          "writable": true
+        },
+        {
+          "name": "proposer",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "fund_gas",
+      "discriminator": [
+        193,
+        180,
+        0,
+        111,
+        189,
+        96,
+        59,
+        88
+      ],
+      "accounts": [
+        {
+          "name": "funder",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "initialize_registry",
       "discriminator": [
         189,
@@ -489,6 +581,114 @@
       "args": []
     },
     {
+      "name": "propose",
+      "discriminator": [
+        93,
+        253,
+        82,
+        168,
+        118,
+        33,
+        102,
+        90
+      ],
+      "accounts": [
+        {
+          "name": "manager",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "proposal",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  112,
+                  111,
+                  115,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "account",
+                "path": "vault.proposal_count",
+                "account": "Vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "targets",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "Target"
+              }
+            }
+          }
+        },
+        {
+          "name": "plan",
+          "type": "string"
+        },
+        {
+          "name": "voting_days",
+          "type": "u8"
+        },
+        {
+          "name": "bond",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "rebalance",
       "docs": [
         "remaining_accounts: first `[mint, vault_token_account]` for every held mint in `vault.held`",
@@ -506,12 +706,13 @@
       ],
       "accounts": [
         {
-          "name": "manager",
+          "name": "keeper",
+          "docs": [
+            "The registry's keeper. Pays the transaction and any new token account, and is paid back a",
+            "flat fee from the vault's gas tank."
+          ],
           "writable": true,
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
+          "signer": true
         },
         {
           "name": "registry",
@@ -1020,34 +1221,51 @@
       ]
     },
     {
-      "name": "set_plan",
+      "name": "set_keeper",
       "discriminator": [
-        200,
-        237,
-        247,
-        74,
-        57,
-        123,
-        11,
-        120
+        102,
+        94,
+        23,
+        78,
+        157,
+        222,
+        243,
+        214
       ],
       "accounts": [
         {
-          "name": "manager",
+          "name": "admin",
           "signer": true,
           "relations": [
-            "vault"
+            "registry"
           ]
         },
         {
-          "name": "vault",
-          "writable": true
+          "name": "registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          }
         }
       ],
       "args": [
         {
-          "name": "text",
-          "type": "string"
+          "name": "keeper",
+          "type": "pubkey"
         }
       ]
     },
@@ -1154,6 +1372,74 @@
       ]
     },
     {
+      "name": "set_strategy",
+      "docs": [
+        "Plan text and target weights. Only before activation."
+      ],
+      "discriminator": [
+        251,
+        41,
+        210,
+        173,
+        140,
+        96,
+        78,
+        235
+      ],
+      "accounts": [
+        {
+          "name": "manager",
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "text",
+          "type": "string"
+        },
+        {
+          "name": "targets",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "Target"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "unpause",
       "discriminator": [
         169,
@@ -1202,6 +1488,99 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "vote",
+      "discriminator": [
+        227,
+        110,
+        155,
+        23,
+        136,
+        126,
+        172,
+        25
+      ],
+      "accounts": [
+        {
+          "name": "voter",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "relations": [
+            "proposal"
+          ]
+        },
+        {
+          "name": "proposal",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "account",
+                "path": "voter"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vote_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  111,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "proposal"
+              },
+              {
+                "kind": "account",
+                "path": "voter"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "approve",
+          "type": "bool"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -1216,6 +1595,19 @@
         64,
         247,
         208
+      ]
+    },
+    {
+      "name": "Proposal",
+      "discriminator": [
+        26,
+        94,
+        189,
+        187,
+        116,
+        136,
+        53,
+        33
       ]
     },
     {
@@ -1243,6 +1635,19 @@
         117,
         119
       ]
+    },
+    {
+      "name": "VoteRecord",
+      "discriminator": [
+        112,
+        9,
+        123,
+        165,
+        234,
+        9,
+        157,
+        167
+      ]
     }
   ],
   "events": [
@@ -1260,6 +1665,19 @@
       ]
     },
     {
+      "name": "GasFunded",
+      "discriminator": [
+        65,
+        38,
+        137,
+        46,
+        170,
+        207,
+        205,
+        73
+      ]
+    },
+    {
       "name": "PlanPosted",
       "discriminator": [
         12,
@@ -1270,6 +1688,32 @@
         241,
         25,
         40
+      ]
+    },
+    {
+      "name": "ProposalCreated",
+      "discriminator": [
+        186,
+        8,
+        160,
+        108,
+        81,
+        13,
+        51,
+        206
+      ]
+    },
+    {
+      "name": "ProposalFinalized",
+      "discriminator": [
+        159,
+        104,
+        210,
+        220,
+        86,
+        209,
+        61,
+        51
       ]
     },
     {
@@ -1335,6 +1779,19 @@
         236,
         78,
         115
+      ]
+    },
+    {
+      "name": "VoteCast",
+      "discriminator": [
+        39,
+        53,
+        195,
+        104,
+        188,
+        17,
+        225,
+        213
       ]
     }
   ],
@@ -1498,6 +1955,91 @@
       "code": 6031,
       "name": "Overflow",
       "msg": "Math overflow"
+    },
+    {
+      "code": 6032,
+      "name": "NotKeeper",
+      "msg": "Only the keeper can do this"
+    },
+    {
+      "code": 6033,
+      "name": "InvalidTargets",
+      "msg": "Targets must be allowlisted, distinct, above zero and sum to 100%"
+    },
+    {
+      "code": 6034,
+      "name": "StrategyLocked",
+      "msg": "The strategy can only change through a passed proposal once the vault is active"
+    },
+    {
+      "code": 6035,
+      "name": "GasTankEmpty",
+      "msg": "The vault's gas tank cannot pay the keeper"
+    },
+    {
+      "code": 6036,
+      "name": "RebalanceTooSoon",
+      "msg": "A rebalance cycle already ran in the last 12 hours"
+    },
+    {
+      "code": 6037,
+      "name": "SellNotOverweight",
+      "msg": "The asset sold is not above its target weight"
+    },
+    {
+      "code": 6038,
+      "name": "BuyNotUnderweight",
+      "msg": "The asset bought is not below its target weight"
+    },
+    {
+      "code": 6039,
+      "name": "TargetOvershoot",
+      "msg": "The trade overshoots a target weight"
+    },
+    {
+      "code": 6040,
+      "name": "InvalidVotingPeriod",
+      "msg": "Voting period must be 1-14 days"
+    },
+    {
+      "code": 6041,
+      "name": "BondTooSmall",
+      "msg": "The proposal bond is below the minimum"
+    },
+    {
+      "code": 6042,
+      "name": "ProposalAlreadyOpen",
+      "msg": "This vault already has a proposal in voting or timelock"
+    },
+    {
+      "code": 6043,
+      "name": "VotingClosed",
+      "msg": "Voting on this proposal is closed"
+    },
+    {
+      "code": 6044,
+      "name": "VotingStillOpen",
+      "msg": "Voting is still open"
+    },
+    {
+      "code": 6045,
+      "name": "NoVotingPower",
+      "msg": "No shares to vote with on this proposal"
+    },
+    {
+      "code": 6046,
+      "name": "WrongProposalStatus",
+      "msg": "The proposal is not in the right status for this"
+    },
+    {
+      "code": 6047,
+      "name": "TimelockActive",
+      "msg": "The timelock has not ended"
+    },
+    {
+      "code": 6048,
+      "name": "WrongProposer",
+      "msg": "That account is not the proposer"
     }
   ],
   "types": [
@@ -1534,6 +2076,26 @@
       }
     },
     {
+      "name": "GasFunded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "gas_tank",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "PlanPosted",
       "type": {
         "kind": "struct",
@@ -1549,6 +2111,16 @@
           {
             "name": "plan",
             "type": "string"
+          },
+          {
+            "name": "targets",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Target"
+                }
+              }
+            }
           }
         ]
       }
@@ -1576,6 +2148,20 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "snapshot_proposal",
+            "docs": [
+              "`id + 1` of the open proposal for which `snapshot_shares` was recorded, or 0."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "snapshot_shares",
+            "docs": [
+              "Shares held just before the first deposit made while that proposal was open."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -1603,6 +2189,186 @@
           {
             "name": "timestamp",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Proposal",
+      "docs": [
+        "A curator's request to change the vault's target weights and plan."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "id",
+            "type": "u64"
+          },
+          {
+            "name": "proposer",
+            "type": "pubkey"
+          },
+          {
+            "name": "targets",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Target"
+                }
+              }
+            }
+          },
+          {
+            "name": "plan",
+            "type": "string"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "voting_ends_at",
+            "type": "i64"
+          },
+          {
+            "name": "timelock_ends_at",
+            "docs": [
+              "Set when the proposal passes."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "total_shares",
+            "docs": [
+              "Vault share supply when proposed; quorum is measured against it."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "yes_votes",
+            "type": "u64"
+          },
+          {
+            "name": "no_votes",
+            "type": "u64"
+          },
+          {
+            "name": "bond",
+            "docs": [
+              "Lamports held on this account (above rent) as the curator's bond."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "ProposalStatus"
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProposalCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "proposal",
+            "type": "pubkey"
+          },
+          {
+            "name": "id",
+            "type": "u64"
+          },
+          {
+            "name": "targets",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Target"
+                }
+              }
+            }
+          },
+          {
+            "name": "plan",
+            "type": "string"
+          },
+          {
+            "name": "voting_ends_at",
+            "type": "i64"
+          },
+          {
+            "name": "bond",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProposalFinalized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "proposal",
+            "type": "pubkey"
+          },
+          {
+            "name": "passed",
+            "type": "bool"
+          },
+          {
+            "name": "yes_votes",
+            "type": "u64"
+          },
+          {
+            "name": "no_votes",
+            "type": "u64"
+          },
+          {
+            "name": "timelock_ends_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProposalStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Voting"
+          },
+          {
+            "name": "Queued"
+          },
+          {
+            "name": "Rejected"
+          },
+          {
+            "name": "Executed"
           }
         ]
       }
@@ -1723,6 +2489,13 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "keeper",
+            "docs": [
+              "The automation key allowed to run target-weight rebalances. Defaults to the guardian."
+            ],
+            "type": "pubkey"
           }
         ]
       }
@@ -1775,6 +2548,25 @@
                 "name": "VaultState"
               }
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Target",
+      "docs": [
+        "One target weight: `bps` of vault value should sit in `mint`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "bps",
+            "type": "u16"
           }
         ]
       }
@@ -1845,6 +2637,48 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "targets",
+            "docs": [
+              "Target weights, summing to 100%. Set once before activation; afterwards only a passed",
+              "proposal changes them."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Target"
+                }
+              }
+            }
+          },
+          {
+            "name": "gas_tank",
+            "docs": [
+              "Lamports held on this account (above rent) that pay the keeper for rebalances."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "cycle_start",
+            "docs": [
+              "Start of the current rebalance cycle (unix seconds); 0 means a new cycle may start now."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "proposal_count",
+            "docs": [
+              "Proposals ever made; the next proposal's id."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "open_proposal",
+            "docs": [
+              "`id + 1` of the proposal in voting or timelock, or 0 if none."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -1892,6 +2726,65 @@
           },
           {
             "name": "Closed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VoteCast",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "proposal",
+            "type": "pubkey"
+          },
+          {
+            "name": "voter",
+            "type": "pubkey"
+          },
+          {
+            "name": "approve",
+            "type": "bool"
+          },
+          {
+            "name": "weight",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VoteRecord",
+      "docs": [
+        "One holder's vote on one proposal. Its existence prevents voting twice."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposal",
+            "type": "pubkey"
+          },
+          {
+            "name": "voter",
+            "type": "pubkey"
+          },
+          {
+            "name": "approve",
+            "type": "bool"
+          },
+          {
+            "name": "weight",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }

@@ -7,7 +7,19 @@
 import {PublicKey} from '@solana/web3.js';
 import {ApiError, connection, parseKey, vaultReadError} from '@/lib/chain/server';
 import {displayPrices} from '@/lib/pricing/source';
-import {folioProgram, positionPda, registryPda, tokenProgramsOf, ata, vaultPda, vaultStateName} from '@/lib/solana/program';
+import {
+  BN,
+  folioProgram,
+  positionPda,
+  proposalPda,
+  registryPda,
+  tokenProgramsOf,
+  ata,
+  vaultPda,
+  vaultStateName,
+  voteRecordPda,
+  REBALANCE_INTERVAL_SECONDS,
+} from '@/lib/solana/program';
 import {tokenByMint} from '@/lib/solana/config';
 
 export const VAULT_STATES = ['DRAFT', 'SEEDED', 'ACTIVE', 'PAUSED', 'CLOSED'] as const;
@@ -23,6 +35,35 @@ export interface Holding {
   amount: string;
   priceUsd: string | null;
   valueUsd: string | null;
+}
+
+export interface TargetWeight {
+  asset: string;
+  symbol: string;
+  targetBps: number;
+  targetPercent: number; // e.g. 50
+}
+
+export type ProposalStatusName = 'Voting' | 'Timelock' | 'Passed' | 'Rejected' | 'Executed';
+
+export interface ProposalView {
+  id: number;
+  address: string;
+  proposer: string;
+  bondLamports: string;
+  planText: string;
+  targets: TargetWeight[];
+  votingEndsAt: number; // unix ms
+  timelockEndsAt: number; // unix ms
+  snapshotShares: string;
+  yesShares: string;
+  noShares: string;
+  status: ProposalStatusName;
+  yesPercent: number;
+  noPercent: number;
+  quorumReached: boolean;
+  hasPassed: boolean;
+  userVote: {voted: boolean; isYes?: boolean; shares?: string} | null;
 }
 
 export interface VaultView {
@@ -41,12 +82,18 @@ export interface VaultView {
   /** The curator's published plan, or null until one is posted on-chain. */
   plan: CuratorPlan | null;
   /** The requested account's stake, when an account was given. */
-  position: {shares: string; valueUsd: string | null} | null;
+  position: {shares: string; valueUsd: string | null; votingPower?: string} | null;
   /** Unix ms when the prices were read. */
   pricedAt: number;
+  /** V2 Governance and autonomous keeper fields */
+  gasTankLamports: string;
+  targets: TargetWeight[];
+  openProposal: ProposalView | null;
+  cycleStart: number;
+  rebalanceIntervalSeconds: number;
 }
 
-/** Free text, never enforced by the program; every `set_plan` bumps the version. */
+/** Free text, never enforced by the program; every `set_strategy` bumps the version. */
 export interface CuratorPlan {
   version: number;
   text: string;
@@ -59,6 +106,7 @@ export function toPlan(text: string, version: bigint): CuratorPlan | null {
   if (version === BigInt(0)) return null;
   return {version: Number(version), text};
 }
+
 
 function units(raw: string, decimals: number): number {
   return Number(raw) / 10 ** decimals;
@@ -112,11 +160,99 @@ export async function readVault(vaultParam: string, account?: PublicKey, prices?
   if (account) {
     const p = await program.account.position.fetchNullable(positionPda(address, account));
     const shares = p ? p.shares.toString() : '0';
+    const votingPower = p ? (p.snapshotShares.gt(new BN(0)) ? p.snapshotShares.toString() : shares) : '0';
     position = {
       shares,
       valueUsd: sharePrice === null ? null : String(units(shares, SHARE_DECIMALS) * sharePrice),
+      votingPower,
     };
   }
+
+  // V2 Strategy targets
+  const targets: TargetWeight[] = (v.targets ?? []).map((t) => {
+    const asset = t.mint.toBase58();
+    const info = tokenByMint(asset);
+    return {
+      asset,
+      symbol: info?.symbol ?? `${asset.slice(0, 4)}…${asset.slice(-4)}`,
+      targetBps: t.bps,
+      targetPercent: t.bps / 100,
+    };
+  });
+
+  // V2 Open Proposal
+  let openProposal: ProposalView | null = null;
+  if (v.openProposal && v.openProposal.gt(new BN(0))) {
+    try {
+      const proposalId = v.openProposal.sub(new BN(1));
+      const proposalAddress = proposalPda(address, proposalId);
+      const prop = await program.account.proposal.fetchNullable(proposalAddress);
+      if (prop) {
+        const propTargets: TargetWeight[] = prop.targets.map((t) => {
+          const asset = t.mint.toBase58();
+          const info = tokenByMint(asset);
+          return {
+            asset,
+            symbol: info?.symbol ?? `${asset.slice(0, 4)}…${asset.slice(-4)}`,
+            targetBps: t.bps,
+            targetPercent: t.bps / 100,
+          };
+        });
+
+        const statusKey = Object.keys(prop.status)[0] ?? 'voting';
+        let status: ProposalStatusName = 'Voting';
+        if (statusKey === 'queued') status = 'Timelock';
+        else if (statusKey === 'rejected') status = 'Rejected';
+        else if (statusKey === 'executed') status = 'Executed';
+
+        const totalVotes = prop.yesVotes.add(prop.noVotes);
+        const yesPercent = totalVotes.gt(new BN(0))
+          ? (prop.yesVotes.toNumber() / totalVotes.toNumber()) * 100
+          : 0;
+        const noPercent = totalVotes.gt(new BN(0))
+          ? (prop.noVotes.toNumber() / totalVotes.toNumber()) * 100
+          : 0;
+        const quorumReached = prop.totalShares.gt(new BN(0)) &&
+          totalVotes.mul(new BN(10000)).div(prop.totalShares).toNumber() >= 2000;
+        const hasPassed = quorumReached && prop.yesVotes.gt(prop.noVotes);
+
+        let userVote: ProposalView['userVote'] = null;
+        if (account) {
+          const vr = await program.account.voteRecord.fetchNullable(voteRecordPda(proposalAddress, account));
+          if (vr) {
+            userVote = {
+              voted: true,
+              isYes: vr.approve,
+              shares: vr.weight.toString(),
+            };
+          }
+        }
+
+        openProposal = {
+          id: prop.id.toNumber(),
+          address: proposalAddress.toBase58(),
+          proposer: prop.proposer.toBase58(),
+          bondLamports: prop.bond.toString(),
+          planText: prop.plan,
+          targets: propTargets,
+          votingEndsAt: prop.votingEndsAt.toNumber() * 1000,
+          timelockEndsAt: prop.timelockEndsAt.toNumber() * 1000,
+          snapshotShares: prop.totalShares.toString(),
+          yesShares: prop.yesVotes.toString(),
+          noShares: prop.noVotes.toString(),
+          status,
+          yesPercent: Math.round(yesPercent * 10) / 10,
+          noPercent: Math.round(noPercent * 10) / 10,
+          quorumReached,
+          hasPassed,
+          userVote,
+        };
+      }
+    } catch {
+      openProposal = null;
+    }
+  }
+
 
   const state = vaultStateName(v.state as Record<string, unknown>).toUpperCase() as VaultView['state'];
   return {
@@ -134,8 +270,14 @@ export async function readVault(vaultParam: string, account?: PublicKey, prices?
     plan: toPlan(v.plan, BigInt(v.planVersion.toString())),
     position,
     pricedAt: Date.now(),
+    gasTankLamports: v.gasTank ? v.gasTank.toString() : '0',
+    targets,
+    openProposal,
+    cycleStart: v.cycleStart ? v.cycleStart.toNumber() : 0,
+    rebalanceIntervalSeconds: REBALANCE_INTERVAL_SECONDS,
   };
 }
+
 
 /** Every vault in the registry, newest first. */
 export async function listVaults(account?: PublicKey): Promise<VaultView[]> {

@@ -51,6 +51,11 @@ pub fn handle_create_vault(ctx: Context<CreateVault>, name: String, manager: Pub
     v.plan_version = 0;
     v.held = vec![registry.settlement_mint];
     v.bump = ctx.bumps.vault;
+    v.targets = Vec::new();
+    v.gas_tank = 0;
+    v.cycle_start = 0;
+    v.proposal_count = 0;
+    v.open_proposal = 0;
     registry.vault_count += 1;
     emit!(VaultCreated { vault: v.key(), index: v.index, manager, name });
     Ok(())
@@ -142,8 +147,13 @@ fn transition(ctx: Context<GuardianOnly>, from: VaultState, to: VaultState) -> R
     Ok(())
 }
 
-/// Opens the vault to outside investors.
+/// Opens the vault to outside investors. Investors must be able to read the plan and its target
+/// weights before they deposit, so both must be set first.
 pub fn handle_activate(ctx: Context<GuardianOnly>) -> Result<()> {
+    require!(
+        ctx.accounts.vault.plan_version > 0 && !ctx.accounts.vault.targets.is_empty(),
+        FolioError::NoPlanPosted
+    );
     transition(ctx, VaultState::Seeded, VaultState::Active)
 }
 

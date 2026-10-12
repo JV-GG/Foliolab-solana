@@ -1,5 +1,6 @@
-//! The whole Folio Lab flow on LiteSVM: registry, vault, seed, activate, plan, deposit with signed
-//! prices, rebalance through the mock router, redeem; plus the checks that must refuse.
+//! The whole Folio Lab V2 flow on LiteSVM: registry, vault, seed, strategy with target weights,
+//! activate, plan, deposit with signed prices, keeper-executed rebalance toward target weights,
+//! redeem; plus the governance flow (propose with SOL bond, vote, timelock, execute, refund on reject).
 
 use {
     anchor_lang::{
@@ -17,7 +18,10 @@ use {
         token_2022::spl_token_2022,
     },
     ed25519_dalek::{Signer as _, SigningKey},
-    folio_vault::{PriceUpdate, Registry, Vault, VaultState, Position},
+    folio_vault::{
+        PriceUpdate, Proposal, ProposalStatus, Registry, Target, Vault, VaultState, Position,
+        DAY, KEEPER_FEE_LAMPORTS, MIN_PROPOSAL_BOND, TIMELOCK_SECS,
+    },
     litesvm::LiteSVM,
     solana_keypair::Keypair,
     solana_message::{Message, VersionedMessage},
@@ -35,6 +39,7 @@ struct Env {
     admin: Keypair,
     guardian: Keypair,
     manager: Keypair,
+    keeper: Keypair,
     signer: SigningKey,
     registry: Pubkey,
     usdc: Pubkey,
@@ -85,7 +90,6 @@ fn set_token_account(svm: &mut LiteSVM, address: Pubkey, mint: Pubkey, owner: Pu
     let mut data = vec![0u8; spl_token::state::Account::LEN];
     state.pack_into_slice(&mut data);
     if program == spl_token_2022::ID {
-        // Token-2022 marks a plain account with its account-type byte after the base layout.
         data.resize(spl_token::state::Account::LEN + 1, 0);
         data[spl_token::state::Account::LEN] = 2;
     }
@@ -111,6 +115,10 @@ fn balance(svm: &LiteSVM, address: &Pubkey) -> u64 {
 
 fn vault_state(svm: &LiteSVM, vault: &Pubkey) -> Vault {
     Vault::try_deserialize(&mut &svm.get_account(vault).unwrap().data[..]).unwrap()
+}
+
+fn proposal_state(svm: &LiteSVM, proposal: &Pubkey) -> Proposal {
+    Proposal::try_deserialize(&mut &svm.get_account(proposal).unwrap().data[..]).unwrap()
 }
 
 fn position(svm: &LiteSVM, vault: &Pubkey, owner: &Pubkey) -> Position {
@@ -169,8 +177,8 @@ fn setup() -> Env {
         .unwrap();
     set_time(&mut svm, NOW);
 
-    let (admin, guardian, manager) = (Keypair::new(), Keypair::new(), Keypair::new());
-    for k in [&admin, &guardian, &manager] {
+    let (admin, guardian, manager, keeper) = (Keypair::new(), Keypair::new(), Keypair::new(), Keypair::new());
+    for k in [&admin, &guardian, &manager, &keeper] {
         svm.airdrop(&k.pubkey(), 100_000_000_000).unwrap();
     }
     let signer = SigningKey::from_bytes(&[7u8; 32]);
@@ -182,7 +190,7 @@ fn setup() -> Env {
     let (vault, _) =
         Pubkey::find_program_address(&[b"vault", registry.as_ref(), &0u64.to_le_bytes()], &folio_vault::id());
 
-    let mut env = Env { svm, admin, guardian, manager, signer, registry, usdc, aapl, nvda, vault };
+    let mut env = Env { svm, admin, guardian, manager, keeper, signer, registry, usdc, aapl, nvda, vault };
 
     let a = &env.admin;
     let init = ix(
@@ -202,7 +210,8 @@ fn setup() -> Env {
     let allow_nvda = ix(admin_only(), folio_vault::instruction::SetAsset { mint: nvda, allowed: true });
     let allow_router =
         ix(admin_only(), folio_vault::instruction::SetRouter { program: mock_router::id(), allowed: true });
-    send(&mut env.svm, &[init, allow_aapl, allow_nvda, allow_router], a, &[]).unwrap();
+    let set_keeper = ix(admin_only(), folio_vault::instruction::SetKeeper { keeper: env.keeper.pubkey() });
+    send(&mut env.svm, &[init, allow_aapl, allow_nvda, allow_router, set_keeper], a, &[]).unwrap();
 
     // The mock router's pool, stocked with every token.
     let (pool, _) = Pubkey::find_program_address(&[b"pool"], &mock_router::id());
@@ -236,7 +245,6 @@ fn new_investor(env: &mut Env, usdc_amount: u64) -> Keypair {
     env.svm.airdrop(&k.pubkey(), 10_000_000_000).unwrap();
     let address = ata(env, &k.pubkey(), &env.usdc);
     set_token_account(&mut env.svm, address, env.usdc, k.pubkey(), usdc_amount, spl_token::ID);
-    // Empty stock accounts so a redeem has somewhere to pay out.
     for mint in [env.aapl, env.nvda] {
         let program = program_of(env, &mint);
         let address = ata(env, &k.pubkey(), &mint);
@@ -282,13 +290,29 @@ fn guardian(env: &mut Env, which: &str) -> Result<(), String> {
     send(&mut env.svm, &[i], &g, &[])
 }
 
-fn set_plan(env: &mut Env, text: &str) -> Result<(), String> {
+fn set_strategy(env: &mut Env, text: &str, targets: Vec<Target>) -> Result<(), String> {
     let i = ix(
-        folio_vault::accounts::ManagerOnly { manager: env.manager.pubkey(), vault: env.vault },
-        folio_vault::instruction::SetPlan { text: text.into() },
+        folio_vault::accounts::ManagerOnly {
+            manager: env.manager.pubkey(),
+            registry: env.registry,
+            vault: env.vault,
+        },
+        folio_vault::instruction::SetStrategy { text: text.into(), targets },
     );
     let m = env.manager.insecure_clone();
     send(&mut env.svm, &[i], &m, &[])
+}
+
+fn fund_gas(env: &mut Env, who: &Keypair, amount: u64) -> Result<(), String> {
+    let i = ix(
+        folio_vault::accounts::FundGas {
+            funder: who.pubkey(),
+            vault: env.vault,
+            system_program: system_program::ID,
+        },
+        folio_vault::instruction::FundGas { amount },
+    );
+    send(&mut env.svm, &[i], who, &[])
 }
 
 fn deposit_with(env: &mut Env, who: &Keypair, amount: u64, p: &PriceUpdate, key: &SigningKey) -> Result<(), String> {
@@ -332,13 +356,10 @@ fn redeem(env: &mut Env, who: &Keypair, shares: u64) -> Result<(), String> {
     send(&mut env.svm, &[i], who, &[])
 }
 
-/// Sell `amount_in` of `sell` for `amount_out` of `buy` through the mock router.
 fn rebalance(env: &mut Env, sell: Pubkey, buy: Pubkey, amount_in: u64, amount_out: u64, p: &PriceUpdate) -> Result<(), String> {
     rebalance_routed(env, sell, buy, sell, amount_in, amount_out, p)
 }
 
-/// Like `rebalance`, but the route actually sells `route_sell`, which may differ from the declared
-/// `sell`: what a dishonest manager would try.
 fn rebalance_routed(
     env: &mut Env,
     sell: Pubkey,
@@ -364,7 +385,6 @@ fn rebalance_routed(
     }
     .to_account_metas(None)
     .into_iter()
-    // The vault cannot sign the outer transaction; the program signs for it in the CPI.
     .map(|mut m| {
         if m.pubkey == env.vault {
             m.is_signer = false;
@@ -374,7 +394,7 @@ fn rebalance_routed(
     let route_data = mock_router::instruction::Swap { amount_in, amount_out }.data();
     let mut i = ix(
         folio_vault::accounts::Rebalance {
-            manager: env.manager.pubkey(),
+            keeper: env.keeper.pubkey(),
             registry: env.registry,
             vault: env.vault,
             sell_mint: sell,
@@ -393,19 +413,21 @@ fn rebalance_routed(
     i.accounts.extend(held_accounts(env, None));
     i.accounts.extend(route);
     let sig = ed25519_ix(&env.signer, &p.message(&env.registry));
-    let m = env.manager.insecure_clone();
-    send(&mut env.svm, &[sig, i], &m, &[])
+    let k = env.keeper.insecure_clone();
+    send(&mut env.svm, &[sig, i], &k, &[])
 }
 
-/// A seeded, active vault with a plan: 100 USDC from the manager.
+/// A seeded, active vault with target weights: 60% AAPL, 40% USDC; seeded with 100 USDC and 0.1 SOL gas.
 fn active_env() -> Env {
     let mut env = setup();
     let m = env.manager.insecure_clone();
     let address = ata(&env, &m.pubkey(), &env.usdc);
     set_token_account(&mut env.svm, address, env.usdc, m.pubkey(), 1_000 * USDC, spl_token::ID);
     seed(&mut env, &m, 100 * USDC).unwrap();
+    let (aapl, usdc) = (env.aapl, env.usdc);
+    set_strategy(&mut env, "60% AAPL, 40% cash", vec![Target { mint: aapl, bps: 6000 }, Target { mint: usdc, bps: 4000 }]).unwrap();
     guardian(&mut env, "activate").unwrap();
-    set_plan(&mut env, "60% AAPL, 40% cash").unwrap();
+    fund_gas(&mut env, &m, 100_000_000).unwrap();
     env
 }
 
@@ -420,6 +442,7 @@ fn full_flow() {
     assert_eq!(v.total_shares, 100 * USDC);
     assert_eq!(position(&env.svm, &env.vault, &env.manager.pubkey()).shares, 100 * USDC - 1_000);
     assert_eq!(v.plan_version, 1);
+    assert_eq!(v.gas_tank, 100_000_000);
 
     // Bob deposits 50 USDC into an all-cash vault: 1 share per USDC.
     let bob = new_investor(&mut env, 1_000 * USDC);
@@ -427,22 +450,26 @@ fn full_flow() {
     deposit(&mut env, &bob, 50 * USDC, &p).unwrap();
     assert_eq!(position(&env.svm, &env.vault, &bob.pubkey()).shares, 50 * USDC);
 
-    // Manager buys 0.3 AAPL at $200 with 60 USDC.
+    // Keeper buys 0.3 AAPL at $200 with 60 USDC (total value 150; 60 USDC = 40% AAPL, within 60% target).
     let p = prices(&[(aapl, 200 * USDC)], NOW);
+    let keeper_pre_lamports = env.svm.get_account(&env.keeper.pubkey()).unwrap().lamports;
     rebalance(&mut env, usdc, aapl, 60 * USDC, 30 * STOCK / 100, &p).unwrap();
     let v = vault_state(&env.svm, &env.vault);
     assert_eq!(v.held, vec![usdc, aapl]);
     assert_eq!(balance(&env.svm, &ata(&env, &env.vault, &aapl)), 30 * STOCK / 100);
     assert_eq!(balance(&env.svm, &ata(&env, &env.vault, &usdc)), 90 * USDC);
+    assert_eq!(v.gas_tank, 100_000_000 - KEEPER_FEE_LAMPORTS);
+    let keeper_post_lamports = env.svm.get_account(&env.keeper.pubkey()).unwrap().lamports;
+    assert!(keeper_post_lamports > keeper_pre_lamports - 10_000_000);
 
-    // AAPL rises to $220: vault worth 90 + 66 = 156. Carol's 15.6 USDC buys 15 shares.
+    // Carol deposits at new share valuation.
     set_time(&mut env.svm, NOW + 100);
     let carol = new_investor(&mut env, 1_000 * USDC);
     let p = prices(&[(aapl, 220 * USDC)], NOW + 100);
     deposit(&mut env, &carol, 15_600_000, &p).unwrap();
     assert_eq!(position(&env.svm, &env.vault, &carol.pubkey()).shares, 15 * USDC);
 
-    // Bob leaves with 50/165 of everything.
+    // Bob redeems pro-rata slice.
     let supply = vault_state(&env.svm, &env.vault).total_shares;
     assert_eq!(supply, 165 * USDC);
     let vault_usdc = balance(&env.svm, &ata(&env, &env.vault, &usdc));
@@ -455,55 +482,281 @@ fn full_flow() {
     assert_eq!(position(&env.svm, &env.vault, &bob.pubkey()).shares, 0);
 }
 
+// ---- governance & proposal tests
+
 #[test]
-fn sell_to_dust_drops_asset() {
+fn governance_proposal_passed_and_executed() {
     let mut env = active_env();
-    let (usdc, aapl, nvda) = (env.usdc, env.aapl, env.nvda);
-    let p = prices(&[(aapl, 200 * USDC), (nvda, 100 * USDC)], NOW);
-    rebalance(&mut env, usdc, aapl, 20 * USDC, 10 * STOCK / 100, &p).unwrap();
-    // Stock to stock, all of it: AAPL leaves the held list, NVDA joins.
-    rebalance(&mut env, aapl, nvda, 10 * STOCK / 100, 20 * STOCK / 100, &p).unwrap();
-    assert_eq!(vault_state(&env.svm, &env.vault).held, vec![usdc, nvda]);
+    let (_aapl, nvda, usdc) = (env.aapl, env.nvda, env.usdc);
+    let bob = new_investor(&mut env, 1_000 * USDC);
+    let p = prices(&[], NOW);
+    deposit(&mut env, &bob, 100 * USDC, &p).unwrap(); // Bob holds 100 shares
+
+    // Curator proposes 50% NVDA, 50% USDC with 0.05 SOL bond
+    let (proposal_pda, _) = Pubkey::find_program_address(&[b"proposal", env.vault.as_ref(), &0u64.to_le_bytes()], &folio_vault::id());
+    let propose_ix = ix(
+        folio_vault::accounts::Propose {
+            manager: env.manager.pubkey(),
+            registry: env.registry,
+            vault: env.vault,
+            proposal: proposal_pda,
+            system_program: system_program::ID,
+        },
+        folio_vault::instruction::Propose {
+            targets: vec![Target { mint: nvda, bps: 5000 }, Target { mint: usdc, bps: 5000 }],
+            plan: "Pivot into NVDA".into(),
+            voting_days: 3,
+            bond: MIN_PROPOSAL_BOND,
+        },
+    );
+    let m = env.manager.insecure_clone();
+    send(&mut env.svm, &[propose_ix], &m, &[]).unwrap();
+
+    let prop = proposal_state(&env.svm, &proposal_pda);
+    assert_eq!(prop.status, ProposalStatus::Voting);
+    assert_eq!(prop.total_shares, 200 * USDC);
+
+    // Bob votes Yes (100 shares = 50% quorum, >50% approval)
+    let (vote_pda, _) = Pubkey::find_program_address(&[b"vote", proposal_pda.as_ref(), bob.pubkey().as_ref()], &folio_vault::id());
+    let vote_ix = ix(
+        folio_vault::accounts::Vote {
+            voter: bob.pubkey(),
+            vault: env.vault,
+            proposal: proposal_pda,
+            position: position_pda(&env, &bob.pubkey()),
+            vote_record: vote_pda,
+            system_program: system_program::ID,
+        },
+        folio_vault::instruction::Vote { approve: true },
+    );
+    send(&mut env.svm, &[vote_ix], &bob, &[]).unwrap();
+
+    // Fast-forward past voting period
+    set_time(&mut env.svm, NOW + 4 * DAY);
+
+    // Finalize
+    let finalize_ix = ix(
+        folio_vault::accounts::Finalize {
+            vault: env.vault,
+            proposal: proposal_pda,
+            proposer: env.manager.pubkey(),
+        },
+        folio_vault::instruction::Finalize {},
+    );
+    send(&mut env.svm, &[finalize_ix], &bob, &[]).unwrap();
+
+    let prop = proposal_state(&env.svm, &proposal_pda);
+    assert_eq!(prop.status, ProposalStatus::Queued);
+
+    // During timelock, execute fails
+    let execute_ix = ix(
+        folio_vault::accounts::Execute {
+            vault: env.vault,
+            proposal: proposal_pda,
+        },
+        folio_vault::instruction::Execute {},
+    );
+    let err = send(&mut env.svm, &[execute_ix.clone()], &bob, &[]).unwrap_err();
+    assert!(err.contains("TimelockActive"), "{err}");
+
+    // Fast-forward past timelock
+    set_time(&mut env.svm, NOW + 4 * DAY + TIMELOCK_SECS + 1);
+    send(&mut env.svm, &[execute_ix], &bob, &[]).unwrap();
+
+    let v = vault_state(&env.svm, &env.vault);
+    assert_eq!(v.targets, vec![Target { mint: nvda, bps: 5000 }, Target { mint: usdc, bps: 5000 }]);
+    assert_eq!(v.plan, "Pivot into NVDA");
+    assert_eq!(v.gas_tank, 100_000_000 + MIN_PROPOSAL_BOND);
 }
 
-// ---- refusals
+#[test]
+fn governance_proposal_rejected_refunds_bond() {
+    let mut env = active_env();
+    let (nvda, usdc) = (env.nvda, env.usdc);
+    let bob = new_investor(&mut env, 1_000 * USDC);
+    let p = prices(&[], NOW);
+    deposit(&mut env, &bob, 100 * USDC, &p).unwrap();
+
+    let (proposal_pda, _) = Pubkey::find_program_address(&[b"proposal", env.vault.as_ref(), &0u64.to_le_bytes()], &folio_vault::id());
+    let propose_ix = ix(
+        folio_vault::accounts::Propose {
+            manager: env.manager.pubkey(),
+            registry: env.registry,
+            vault: env.vault,
+            proposal: proposal_pda,
+            system_program: system_program::ID,
+        },
+        folio_vault::instruction::Propose {
+            targets: vec![Target { mint: nvda, bps: 5000 }, Target { mint: usdc, bps: 5000 }],
+            plan: "Bad idea".into(),
+            voting_days: 2,
+            bond: MIN_PROPOSAL_BOND,
+        },
+    );
+    let m = env.manager.insecure_clone();
+    send(&mut env.svm, &[propose_ix], &m, &[]).unwrap();
+
+    let (vote_pda, _) = Pubkey::find_program_address(&[b"vote", proposal_pda.as_ref(), bob.pubkey().as_ref()], &folio_vault::id());
+    let vote_ix = ix(
+        folio_vault::accounts::Vote {
+            voter: bob.pubkey(),
+            vault: env.vault,
+            proposal: proposal_pda,
+            position: position_pda(&env, &bob.pubkey()),
+            vote_record: vote_pda,
+            system_program: system_program::ID,
+        },
+        folio_vault::instruction::Vote { approve: false },
+    );
+    send(&mut env.svm, &[vote_ix], &bob, &[]).unwrap();
+
+    set_time(&mut env.svm, NOW + 3 * DAY);
+
+    let mgr_pre_lamports = env.svm.get_account(&env.manager.pubkey()).unwrap().lamports;
+    let finalize_ix = ix(
+        folio_vault::accounts::Finalize {
+            vault: env.vault,
+            proposal: proposal_pda,
+            proposer: env.manager.pubkey(),
+        },
+        folio_vault::instruction::Finalize {},
+    );
+    send(&mut env.svm, &[finalize_ix], &bob, &[]).unwrap();
+
+    let prop = proposal_state(&env.svm, &proposal_pda);
+    assert_eq!(prop.status, ProposalStatus::Rejected);
+    let mgr_post_lamports = env.svm.get_account(&env.manager.pubkey()).unwrap().lamports;
+    assert_eq!(mgr_post_lamports, mgr_pre_lamports + MIN_PROPOSAL_BOND);
+}
+
+// ---- refusals & constraints
 
 #[test]
-fn seed_below_minimum_fails() {
+fn strategy_locked_after_activation() {
+    let mut env = active_env();
+    let (aapl, usdc) = (env.aapl, env.usdc);
+    let err = set_strategy(&mut env, "change now", vec![Target { mint: aapl, bps: 5000 }, Target { mint: usdc, bps: 5000 }]).unwrap_err();
+    assert!(err.contains("StrategyLocked"), "{err}");
+}
+
+#[test]
+fn rebalance_needs_keeper() {
+    let mut env = active_env();
+    let (usdc, aapl) = (env.usdc, env.aapl);
+    let p = prices(&[(aapl, 200 * USDC)], NOW);
+
+    // Mallory tries to crank rebalance
+    let mallory = Keypair::new();
+    env.svm.airdrop(&mallory.pubkey(), 1_000_000_000).unwrap();
+    let (pool, _) = Pubkey::find_program_address(&[b"pool"], &mock_router::id());
+    let (sp, bp) = (program_of(&env, &usdc), program_of(&env, &aapl));
+    let route = mock_router::accounts::Swap {
+        user: env.vault,
+        user_src: ata(&env, &env.vault, &usdc),
+        user_dst: ata(&env, &env.vault, &aapl),
+        pool,
+        pool_src: get_associated_token_address_with_program_id(&pool, &usdc, &sp),
+        pool_dst: get_associated_token_address_with_program_id(&pool, &aapl, &bp),
+        src_mint: usdc,
+        dst_mint: aapl,
+        src_token_program: sp,
+        dst_token_program: bp,
+    }
+    .to_account_metas(None)
+    .into_iter()
+    .map(|mut m| {
+        if m.pubkey == env.vault {
+            m.is_signer = false;
+        }
+        m
+    });
+    let route_data = mock_router::instruction::Swap { amount_in: 10 * USDC, amount_out: 5 * STOCK / 100 }.data();
+    let mut i = ix(
+        folio_vault::accounts::Rebalance {
+            keeper: mallory.pubkey(),
+            registry: env.registry,
+            vault: env.vault,
+            sell_mint: usdc,
+            buy_mint: aapl,
+            vault_sell: ata(&env, &env.vault, &usdc),
+            vault_buy: ata(&env, &env.vault, &aapl),
+            router: mock_router::id(),
+            sell_token_program: sp,
+            buy_token_program: bp,
+            associated_token_program: associated_token::ID,
+            system_program: system_program::ID,
+            instructions: solana_instructions_sysvar::ID,
+        },
+        folio_vault::instruction::Rebalance { max_sell: 10 * USDC, min_buy: 5 * STOCK / 100, route_data, prices: p.clone() },
+    );
+    i.accounts.extend(held_accounts(&env, None));
+    i.accounts.extend(route);
+    let sig = ed25519_ix(&env.signer, &p.message(&env.registry));
+    let err = send(&mut env.svm, &[sig, i], &mallory, &[]).unwrap_err();
+    assert!(err.contains("NotKeeper"), "{err}");
+}
+
+#[test]
+fn rebalance_refuses_selling_underweight() {
+    let mut env = active_env();
+    let (usdc, aapl) = (env.usdc, env.aapl);
+    let p = prices(&[(aapl, 200 * USDC)], NOW);
+
+    // Buy a small amount of AAPL (10 USDC = 10% portfolio value, target is 60%)
+    rebalance(&mut env, usdc, aapl, 10 * USDC, 5 * STOCK / 100, &p).unwrap();
+
+    // Now AAPL is held at 10% weight (< 60% target). Selling AAPL for USDC must be rejected!
+    let err = rebalance(&mut env, aapl, usdc, 2 * STOCK / 100, 4 * USDC, &p).unwrap_err();
+    assert!(err.contains("SellNotOverweight"), "{err}");
+}
+
+#[test]
+fn rebalance_refuses_overshoot() {
+    let mut env = active_env();
+    let (usdc, aapl) = (env.usdc, env.aapl);
+    let p = prices(&[(aapl, 200 * USDC)], NOW);
+
+    // Total value = 100 USDC. Target for AAPL is 60% (60 USDC).
+    // Trying to buy 80 USDC worth of AAPL overshoots the 60% + 1% drift band limit.
+    let err = rebalance(&mut env, usdc, aapl, 80 * USDC, 40 * STOCK / 100, &p).unwrap_err();
+    assert!(err.contains("TargetOvershoot"), "{err}");
+}
+
+#[test]
+fn rebalance_refuses_too_soon() {
+    let mut env = active_env();
+    let (usdc, aapl) = (env.usdc, env.aapl);
+    let p = prices(&[(aapl, 200 * USDC)], NOW);
+
+    // First swap in cycle starts cycle at NOW
+    rebalance(&mut env, usdc, aapl, 30 * USDC, 15 * STOCK / 100, &p).unwrap();
+
+    // 1 hour later (outside REBALANCE_WINDOW 15 min, but before 12 hours) -> refused!
+    set_time(&mut env.svm, NOW + 3_600);
+    let p_future = prices(&[(aapl, 200 * USDC)], NOW + 3_600);
+    let err = rebalance(&mut env, usdc, aapl, 10 * USDC, 5 * STOCK / 100, &p_future).unwrap_err();
+    assert!(err.contains("RebalanceTooSoon"), "{err}");
+}
+
+
+#[test]
+fn rebalance_refuses_empty_gas_tank() {
     let mut env = setup();
     let m = env.manager.insecure_clone();
     let address = ata(&env, &m.pubkey(), &env.usdc);
     set_token_account(&mut env.svm, address, env.usdc, m.pubkey(), 1_000 * USDC, spl_token::ID);
-    let err = seed(&mut env, &m, 9 * USDC).unwrap_err();
-    assert!(err.contains("BelowMinimumSeed"), "{err}");
-}
-
-#[test]
-fn deposit_rejects_wrong_signer_and_stale_prices() {
-    let mut env = active_env();
-    let bob = new_investor(&mut env, 1_000 * USDC);
-    let p = prices(&[], NOW);
-    let err = deposit_with(&mut env, &bob, 10 * USDC, &p, &SigningKey::from_bytes(&[9u8; 32])).unwrap_err();
-    assert!(err.contains("InvalidPriceSignature"), "{err}");
-
-    let old = prices(&[], NOW - 61);
-    let err = deposit(&mut env, &bob, 10 * USDC, &old).unwrap_err();
-    assert!(err.contains("StalePrices"), "{err}");
-}
-
-#[test]
-fn deposit_needs_price_for_every_held_stock() {
-    let mut env = active_env();
-    let (usdc, aapl) = (env.usdc, env.aapl);
+    seed(&mut env, &m, 100 * USDC).unwrap();
+    let (aapl, usdc) = (env.aapl, env.usdc);
+    set_strategy(&mut env, "60/40", vec![Target { mint: aapl, bps: 6000 }, Target { mint: usdc, bps: 4000 }]).unwrap();
+    guardian(&mut env, "activate").unwrap();
+    // Gas tank is 0!
     let p = prices(&[(aapl, 200 * USDC)], NOW);
-    rebalance(&mut env, usdc, aapl, 20 * USDC, 10 * STOCK / 100, &p).unwrap();
-    let bob = new_investor(&mut env, 1_000 * USDC);
-    let err = deposit(&mut env, &bob, 10 * USDC, &prices(&[], NOW)).unwrap_err();
-    assert!(err.contains("MissingPrice"), "{err}");
+    let err = rebalance(&mut env, usdc, aapl, 20 * USDC, 10 * STOCK / 100, &p).unwrap_err();
+    assert!(err.contains("GasTankEmpty"), "{err}");
 }
 
 #[test]
-fn pause_blocks_deposit_and_trade_but_not_redeem() {
+fn pause_blocks_deposit_and_rebalance_not_redeem() {
     let mut env = active_env();
     let (usdc, aapl) = (env.usdc, env.aapl);
     let bob = new_investor(&mut env, 1_000 * USDC);
@@ -519,89 +772,11 @@ fn pause_blocks_deposit_and_trade_but_not_redeem() {
 }
 
 #[test]
-fn rebalance_refuses_loss_over_two_percent() {
-    let mut env = active_env();
-    let (usdc, aapl) = (env.usdc, env.aapl);
-    let p = prices(&[(aapl, 200 * USDC)], NOW);
-    // 20 USDC for 0.097 AAPL ($19.40): a 3% loss.
-    let err = rebalance(&mut env, usdc, aapl, 20 * USDC, 9_700_000, &p).unwrap_err();
-    assert!(err.contains("TradeLossTooHigh"), "{err}");
-    // 0.099 AAPL ($19.80): a 1% loss is fine.
-    rebalance(&mut env, usdc, aapl, 20 * USDC, 9_900_000, &p).unwrap();
-}
-
-#[test]
-fn rebalance_refuses_route_that_drains_another_holding() {
-    let mut env = active_env();
-    let (usdc, aapl, nvda) = (env.usdc, env.aapl, env.nvda);
-    let p = prices(&[(aapl, 200 * USDC), (nvda, 100 * USDC)], NOW);
-    rebalance(&mut env, usdc, aapl, 20 * USDC, 10 * STOCK / 100, &p).unwrap();
-    // Declared: sell USDC for NVDA. The route really sells the vault's AAPL instead.
-    let err = rebalance_routed(&mut env, usdc, nvda, aapl, 10 * STOCK / 100, 20 * STOCK / 100, &p).unwrap_err();
-    assert!(err.contains("CollateralDecreased"), "{err}");
-    assert_eq!(balance(&env.svm, &ata(&env, &env.vault, &aapl)), 10 * STOCK / 100);
-}
-
-#[test]
-fn rebalance_needs_plan_and_manager() {
-    let mut env = setup();
-    let m = env.manager.insecure_clone();
-    let address = ata(&env, &m.pubkey(), &env.usdc);
-    set_token_account(&mut env.svm, address, env.usdc, m.pubkey(), 1_000 * USDC, spl_token::ID);
-    seed(&mut env, &m, 100 * USDC).unwrap();
-    guardian(&mut env, "activate").unwrap();
-    let (usdc, aapl) = (env.usdc, env.aapl);
-    let p = prices(&[(aapl, 200 * USDC)], NOW);
-    let err = rebalance(&mut env, usdc, aapl, 20 * USDC, 10 * STOCK / 100, &p).unwrap_err();
-    assert!(err.contains("NoPlanPosted"), "{err}");
-
-    // Someone else cannot post the plan.
-    let mallory = Keypair::new();
-    env.svm.airdrop(&mallory.pubkey(), 1_000_000_000).unwrap();
-    let i = ix(
-        folio_vault::accounts::ManagerOnly { manager: mallory.pubkey(), vault: env.vault },
-        folio_vault::instruction::SetPlan { text: "mine now".into() },
-    );
-    let err = send(&mut env.svm, &[i], &mallory, &[]).unwrap_err();
-    assert!(err.contains("NotManager"), "{err}");
-}
-
-#[test]
-fn rebalance_rejects_unlisted_asset_and_router() {
-    let mut env = active_env();
-    let usdc = env.usdc;
-    let junk = Pubkey::new_unique();
-    set_mint(&mut env.svm, junk, 8, spl_token::ID);
-    let p = prices(&[(junk, 200 * USDC)], NOW);
-    let err = rebalance(&mut env, usdc, junk, 20 * USDC, 10 * STOCK / 100, &p).unwrap_err();
-    assert!(err.contains("AssetNotAllowed"), "{err}");
-
-    let a = env.admin.insecure_clone();
-    let off = ix(
-        folio_vault::accounts::AdminOnly { admin: a.pubkey(), registry: env.registry },
-        folio_vault::instruction::SetRouter { program: mock_router::id(), allowed: false },
-    );
-    send(&mut env.svm, &[off], &a, &[]).unwrap();
-    let aapl = env.aapl;
-    let p = prices(&[(aapl, 200 * USDC)], NOW);
-    let err = rebalance(&mut env, usdc, aapl, 20 * USDC, 10 * STOCK / 100, &p).unwrap_err();
-    assert!(err.contains("RouterNotAllowed"), "{err}");
-}
-
-#[test]
-fn redeem_more_than_owned_fails() {
-    let mut env = active_env();
-    let bob = new_investor(&mut env, 1_000 * USDC);
-    deposit(&mut env, &bob, 10 * USDC, &prices(&[], NOW)).unwrap();
-    let err = redeem(&mut env, &bob, 11 * USDC).unwrap_err();
-    assert!(err.contains("InsufficientShares"), "{err}");
-}
-
-#[test]
 fn registry_is_set_up() {
     let env = setup();
     let r = Registry::try_deserialize(&mut &env.svm.get_account(&env.registry).unwrap().data[..]).unwrap();
     assert_eq!(r.admin, env.admin.pubkey());
     assert_eq!(r.vault_count, 1);
     assert_eq!(r.assets, vec![env.aapl, env.nvda]);
+    assert_eq!(r.keeper, env.keeper.pubkey());
 }

@@ -82,6 +82,27 @@ export function poolPda(): PublicKey {
   return PublicKey.findProgramAddressSync([Buffer.from('pool')], ROUTER_PROGRAM_ID)[0];
 }
 
+export function proposalPda(vault: PublicKey, id: number | bigint | BN): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('proposal'), vault.toBuffer(), Buffer.from(le64(id))],
+    FOLIO_PROGRAM_ID,
+  )[0];
+}
+
+export function voteRecordPda(proposal: PublicKey, voter: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('vote'), proposal.toBuffer(), voter.toBuffer()],
+    FOLIO_PROGRAM_ID,
+  )[0];
+}
+
+export const KEEPER_FEE_LAMPORTS = 20_000;
+export const MIN_PROPOSAL_BOND_LAMPORTS = 50_000_000; // 0.05 SOL
+export const DRIFT_BAND_BPS = 100; // 1%
+export const QUORUM_BPS = 2_000; // 20%
+export const TIMELOCK_SECONDS = 172_800; // 48h
+export const REBALANCE_INTERVAL_SECONDS = 43_200; // 12h
+
 // ---- token accounts
 
 /** The token program that owns `mint` (legacy SPL Token or Token-2022). */

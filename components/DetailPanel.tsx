@@ -3,6 +3,7 @@
 import {money, shortAddress, tokenAmount} from '@/lib/domain/format';
 import type {VaultView} from '@/lib/contracts/hooks';
 import {allocation} from './allocation';
+import {GovernanceProposalCard} from './GovernanceProposalCard';
 
 export type TradeType = 'invest' | 'withdraw';
 interface Props { vault: VaultView; connected: boolean; onTrade: (type: TradeType) => void; }
@@ -17,14 +18,23 @@ export function DetailPanel({vault, connected, onTrade}: Props) {
   const supply = BigInt(vault.totalSupply);
   const sharePpm = supply > BigInt(0) ? Number(shares * BigInt(1_000_000) / supply) : null;
   const sharePercent = sharePpm === null ? null : sharePpm / 10_000;
+  const gasTankSol = (Number(vault.gasTankLamports ?? '0') / 1e9).toFixed(3);
 
   return (
     <article aria-label="Selected vault" className="folio-enter min-w-0 max-w-full overflow-x-clip">
       <header className="grid gap-10 border-b border-[#aeb8ad] pb-10 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-3"><p className="eyebrow">Vault details</p><span className={`folio-status ${vault.state === 'ACTIVE' ? 'folio-status-active' : vault.state === 'CLOSED' ? 'folio-status-closed' : 'folio-status-neutral'}`}>{vault.state}</span></div>
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="eyebrow">Vault details</p>
+            <span className={`folio-status ${vault.state === 'ACTIVE' ? 'folio-status-active' : vault.state === 'CLOSED' ? 'folio-status-closed' : 'folio-status-neutral'}`}>
+              {vault.state}
+            </span>
+            <span className="rounded-full border border-[#7aa99d] bg-[#dfede8] px-2.5 py-0.5 text-[10px] font-semibold text-[#237b68]">
+              ⛽ Gas Tank: {gasTankSol} SOL
+            </span>
+          </div>
           <h1 className="page-title mt-5 break-words">{vault.name}</h1>
-          <p className="mt-4 text-[11px] text-[#737d75]">Managed by {shortAddress(vault.manager)} · {vault.symbol}</p>
+          <p className="mt-4 text-[11px] text-[#737d75]">Managed by {shortAddress(vault.manager)} · {vault.symbol} · Autonomous 12h Index Rebalance</p>
         </div>
         <dl className="grid min-w-0 max-w-full grid-cols-2 gap-x-10 gap-y-4 lg:min-w-[390px] lg:text-right">
           <LargeMetric label="Vault value" value={vault.totalValueUsd === null ? 'Unavailable' : money(Number(vault.totalValueUsd))} />
@@ -32,17 +42,35 @@ export function DetailPanel({vault, connected, onTrade}: Props) {
         </dl>
       </header>
 
+      {/* Active Governance Proposal Card */}
+      <GovernanceProposalCard vault={vault} connected={connected} />
+
       <div className="grid gap-16 py-12 lg:grid-cols-[minmax(0,1.25fr)_minmax(320px,.75fr)] lg:gap-20">
         <section className="min-w-0">
-          <SectionTitle eyebrow="Current composition">Holdings</SectionTitle>
+          <SectionTitle eyebrow="Portfolio Allocation">Holdings & Target Weights</SectionTitle>
           {slices.length > 0 && <div className="mt-7 flex h-2 gap-px overflow-hidden rounded-full bg-[#dce1da]">{slices.map((slice) => slice.percent === null ? null : <span key={slice.symbol} style={{width: `${slice.percent}%`, background: slice.color}} />)}</div>}
           <div className="mt-4 border-t border-[#cdd3ca]">
             {held.length ? held.map((holding) => {
               const slice = slices.find((entry) => entry.symbol === holding.symbol);
+              const target = vault.targets?.find((t) => t.asset === holding.asset);
               return (
                 <div key={holding.asset} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-[#cdd3ca] py-5">
-                  <span className="flex min-w-0 items-center gap-3"><i className="h-3 w-3 shrink-0 rounded-full" style={{background: slice?.color ?? '#7c887e'}} /><span className="min-w-0"><strong className="block truncate text-[13px]">{holding.symbol}</strong><small className="mt-1 block text-[9px] text-[#7b847c]">{tokenAmount(holding.amount, holding.decimals, 4)} units</small></span></span>
-                  <strong className="text-[13px]">{holding.valueUsd === null ? 'Price unavailable' : money(Number(holding.valueUsd))}</strong>
+                  <span className="flex min-w-0 items-center gap-3">
+                    <i className="h-3 w-3 shrink-0 rounded-full" style={{background: slice?.color ?? '#7c887e'}} />
+                    <span className="min-w-0">
+                      <strong className="block truncate text-[13px]">{holding.symbol}</strong>
+                      <small className="mt-1 block text-[9px] text-[#7b847c]">
+                        {tokenAmount(holding.amount, holding.decimals, 4)} units
+                        {target ? ` · Target: ${target.targetPercent}%` : ''}
+                      </small>
+                    </span>
+                  </span>
+                  <div className="text-right">
+                    <strong className="block text-[13px]">{holding.valueUsd === null ? 'Price unavailable' : money(Number(holding.valueUsd))}</strong>
+                    {slice?.percent !== null && slice?.percent !== undefined && (
+                      <span className="text-[10px] text-[#788479] font-mono">{slice.percent.toFixed(1)}% actual</span>
+                    )}
+                  </div>
                 </div>
               );
             }) : <EmptyLine>No assets are held yet.</EmptyLine>}
@@ -50,10 +78,21 @@ export function DetailPanel({vault, connected, onTrade}: Props) {
           {pricesMissing && <p className="mt-5 border-l-2 border-[#b28b13] pl-4 text-[11px] leading-6 text-[#71600e]">A non-zero holding has no live price. Total value, allocation and deposits remain unavailable; withdrawals still work.</p>}
 
           <section className="mt-16">
-            <div className="flex items-end justify-between gap-4"><SectionTitle eyebrow="Manager guidance">Published plan</SectionTitle>{vault.plan && <span className="text-[10px] font-bold text-[#717b72]">VERSION {vault.plan.version}</span>}</div>
-            {vault.plan ? <><p className="font-editorial mt-7 whitespace-pre-wrap break-words border-y border-[#cdd3ca] py-7 text-[clamp(20px,2.4vw,30px)] leading-[1.45] tracking-[-0.02em] text-[#35463b]">“{vault.plan.text}”</p><p className="mt-3 text-[10px] leading-5 text-[#7a837b]">Advisory text posted on-chain by the manager; it is not mechanically enforced.</p></> : <EmptyLine>No plan has been published. This vault cannot rebalance until a plan exists.</EmptyLine>}
+            <div className="flex items-end justify-between gap-4">
+              <SectionTitle eyebrow="Curator Strategy">Investment Thesis</SectionTitle>
+              {vault.plan && <span className="text-[10px] font-bold text-[#717b72]">STRATEGY V{vault.plan.version}</span>}
+            </div>
+            {vault.plan ? (
+              <>
+                <p className="font-editorial mt-7 whitespace-pre-wrap break-words border-y border-[#cdd3ca] py-7 text-[clamp(20px,2.4vw,30px)] leading-[1.45] tracking-[-0.02em] text-[#35463b]">“{vault.plan.text}”</p>
+                <p className="mt-3 text-[10px] leading-5 text-[#7a837b]">Governed on-chain strategy. Any amendments to target weights or thesis must pass investor voting with 20% quorum.</p>
+              </>
+            ) : (
+              <EmptyLine>No plan has been published.</EmptyLine>
+            )}
           </section>
         </section>
+
 
         <aside className="min-w-0 self-start lg:sticky lg:top-28">
           <SectionTitle eyebrow="Connected wallet">Your position</SectionTitle>

@@ -133,7 +133,7 @@ async function main() {
   const rebalance = await program.methods
     .rebalance(new BN(built.trade.maxSell), new BN(built.trade.minBuy), Buffer.from(built.trade.routeData, 'base64'), toPriceArg(tradePrices.update))
     .accountsPartial({
-      manager: manager.publicKey,
+      keeper: manager.publicKey,
       registry: registryPda(),
       vault,
       sellMint: usdc,

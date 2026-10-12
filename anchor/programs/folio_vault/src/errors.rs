@@ -66,4 +66,38 @@ pub enum FolioError {
     ListFull,
     #[msg("Math overflow")]
     Overflow,
+    #[msg("Only the keeper can do this")]
+    NotKeeper,
+    #[msg("Targets must be allowlisted, distinct, above zero and sum to 100%")]
+    InvalidTargets,
+    #[msg("The strategy can only change through a passed proposal once the vault is active")]
+    StrategyLocked,
+    #[msg("The vault's gas tank cannot pay the keeper")]
+    GasTankEmpty,
+    #[msg("A rebalance cycle already ran in the last 12 hours")]
+    RebalanceTooSoon,
+    #[msg("The asset sold is not above its target weight")]
+    SellNotOverweight,
+    #[msg("The asset bought is not below its target weight")]
+    BuyNotUnderweight,
+    #[msg("The trade overshoots a target weight")]
+    TargetOvershoot,
+    #[msg("Voting period must be 1-14 days")]
+    InvalidVotingPeriod,
+    #[msg("The proposal bond is below the minimum")]
+    BondTooSmall,
+    #[msg("This vault already has a proposal in voting or timelock")]
+    ProposalAlreadyOpen,
+    #[msg("Voting on this proposal is closed")]
+    VotingClosed,
+    #[msg("Voting is still open")]
+    VotingStillOpen,
+    #[msg("No shares to vote with on this proposal")]
+    NoVotingPower,
+    #[msg("The proposal is not in the right status for this")]
+    WrongProposalStatus,
+    #[msg("The timelock has not ended")]
+    TimelockActive,
+    #[msg("That account is not the proposer")]
+    WrongProposer,
 }

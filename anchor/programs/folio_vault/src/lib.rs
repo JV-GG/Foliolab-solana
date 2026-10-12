@@ -10,6 +10,12 @@
 //!   instruction, which must sit directly before ours in the same transaction.
 //! - `rebalance` CPIs into an allowlisted swap program (Jupiter on mainnet, `mock_router` on
 //!   devnet) with the vault PDA as signer, then checks every held balance and authority.
+//!
+//! V2, governed index: the curator fixes target weights before activation; only the keeper
+//! rebalances, and only toward those weights, at most once per 12 h cycle, paid from the vault's
+//! gas tank. Changing the weights takes a holder vote (snapshot-weighted, 20% quorum, majority),
+//! then a 48 h timelock in which dissenters can redeem. The proposal's SOL bond is refunded if
+//! rejected and funds the gas tank if executed.
 
 use anchor_lang::prelude::*;
 
@@ -53,6 +59,10 @@ pub mod folio_vault {
 
     pub fn set_price_signer(ctx: Context<AdminOnly>, signer: Pubkey) -> Result<()> {
         instructions::admin::handle_set_price_signer(ctx, signer)
+    }
+
+    pub fn set_keeper(ctx: Context<AdminOnly>, keeper: Pubkey) -> Result<()> {
+        instructions::admin::handle_set_keeper(ctx, keeper)
     }
 
     // ---- lifecycle
@@ -101,9 +111,12 @@ pub mod folio_vault {
 
     // ---- manager
 
-    pub fn set_plan(ctx: Context<ManagerOnly>, text: String) -> Result<()> {
-        instructions::manager::handle_set_plan(ctx, text)
+    /// Plan text and target weights. Only before activation.
+    pub fn set_strategy(ctx: Context<ManagerOnly>, text: String, targets: Vec<Target>) -> Result<()> {
+        instructions::manager::handle_set_strategy(ctx, text, targets)
     }
+
+    // ---- keeper
 
     /// remaining_accounts: first `[mint, vault_token_account]` for every held mint in `vault.held`
     /// order, then exactly the accounts the router instruction expects, in its order.
@@ -115,5 +128,33 @@ pub mod folio_vault {
         prices: PriceUpdate,
     ) -> Result<()> {
         instructions::manager::handle_rebalance(ctx, max_sell, min_buy, route_data, prices)
+    }
+
+    // ---- governance
+
+    pub fn propose(
+        ctx: Context<Propose>,
+        targets: Vec<Target>,
+        plan: String,
+        voting_days: u8,
+        bond: u64,
+    ) -> Result<()> {
+        instructions::governance::handle_propose(ctx, targets, plan, voting_days, bond)
+    }
+
+    pub fn vote(ctx: Context<Vote>, approve: bool) -> Result<()> {
+        instructions::governance::handle_vote(ctx, approve)
+    }
+
+    pub fn finalize(ctx: Context<Finalize>) -> Result<()> {
+        instructions::governance::handle_finalize(ctx)
+    }
+
+    pub fn execute(ctx: Context<Execute>) -> Result<()> {
+        instructions::governance::handle_execute(ctx)
+    }
+
+    pub fn fund_gas(ctx: Context<FundGas>, amount: u64) -> Result<()> {
+        instructions::governance::handle_fund_gas(ctx, amount)
     }
 }

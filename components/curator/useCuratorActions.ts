@@ -144,9 +144,14 @@ export function useCuratorActions() {
       const manager = requireWallet();
       setAction('publishing');
       try {
-        const ix = await folioProgram(connection)
-          .methods.setPlan(text)
-          .accountsPartial({manager, vault: new PublicKey(vaultAddress)})
+        const program = folioProgram(connection);
+        const vault = new PublicKey(vaultAddress);
+        const v = await program.account.vault.fetch(vault);
+        // In V2, setStrategy sets plan and keeps targets if already set
+        const targets = v.targets ?? [];
+        const ix = await program
+          .methods.setStrategy(text, targets)
+          .accountsPartial({manager, registry: registryPda(), vault})
           .instruction();
         const signature = await send([ix]);
         await refresh();
@@ -158,6 +163,75 @@ export function useCuratorActions() {
     [connection, refresh, requireWallet, send],
   );
 
+  const setStrategy = useCallback(
+    async (
+      vaultAddress: string,
+      text: string,
+      targets: {mint: PublicKey; targetBps: number}[],
+    ): Promise<string> => {
+      const manager = requireWallet();
+      setAction('publishing');
+      try {
+        const program = folioProgram(connection);
+        const vault = new PublicKey(vaultAddress);
+        const ix = await program
+          .methods.setStrategy(text, targets.map((t) => ({mint: t.mint, bps: t.targetBps})))
+          .accountsPartial({manager, registry: registryPda(), vault})
+          .instruction();
+        const signature = await send([ix]);
+        await refresh();
+        return signature;
+      } finally {
+        setAction('idle');
+      }
+    },
+    [connection, refresh, requireWallet, send],
+  );
+
+  const proposeStrategy = useCallback(
+    async (
+      vaultAddress: string,
+      text: string,
+      targets: {mint: PublicKey; targetBps: number}[],
+      votingDays: number = 3,
+      bondLamports: number | bigint = 50_000_000,
+    ): Promise<string> => {
+      const proposer = requireWallet();
+      setAction('publishing');
+      try {
+        const program = folioProgram(connection);
+        const vault = new PublicKey(vaultAddress);
+        const v = await program.account.vault.fetch(vault);
+        const proposal = PublicKey.findProgramAddressSync(
+          [Buffer.from('proposal'), vault.toBuffer(), Buffer.from(new BN(v.proposalCount).toArray('le', 8))],
+          program.programId,
+        )[0];
+
+        const ix = await program
+          .methods.propose(
+            targets.map((t) => ({mint: t.mint, bps: t.targetBps})),
+            text,
+            votingDays,
+            new BN(bondLamports.toString()),
+          )
+          .accountsPartial({
+            manager: proposer,
+            vault,
+            proposal,
+            systemProgram: SystemProgram.programId,
+          })
+          .instruction();
+        const signature = await send([ix]);
+        await refresh();
+        return signature;
+      } finally {
+        setAction('idle');
+      }
+    },
+    [connection, refresh, requireWallet, send],
+  );
+
+
   const executeRebalance = useCallback(
     async (
       vaultAddress: string,
@@ -165,7 +239,7 @@ export function useCuratorActions() {
       signedPrices: SignedPrices,
       onStage?: (stage: RebalanceStage) => void,
     ): Promise<RebalanceResult> => {
-      const manager = requireWallet();
+      const keeper = requireWallet();
       const vault = new PublicKey(vaultAddress);
       const sell = new PublicKey(quote.trade.sellMint);
       const buy = new PublicKey(quote.trade.buyMint);
@@ -185,7 +259,7 @@ export function useCuratorActions() {
             toPriceArg(signedPrices.update),
           )
           .accountsPartial({
-            manager,
+            keeper,
             registry: registryPda(),
             vault,
             sellMint: sell,
@@ -194,6 +268,7 @@ export function useCuratorActions() {
             vaultBuy: ata(vault, buy, buyProgram),
             router: new PublicKey(quote.trade.router),
             sellTokenProgram: sellProgram,
+
             buyTokenProgram: buyProgram,
             associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
@@ -260,5 +335,41 @@ export function useCuratorActions() {
     [connection, refresh, requireWallet, send],
   );
 
-  return {action, createAndSeed, seedExistingVault, activateVault, publishPlan, executeRebalance};
+  const fundGas = useCallback(
+    async (vaultAddress: string, lamports: number | bigint): Promise<string> => {
+      const funder = requireWallet();
+      setAction('publishing');
+      try {
+        const program = folioProgram(connection);
+        const vault = new PublicKey(vaultAddress);
+        const ix = await program.methods
+          .fundGas(new BN(lamports.toString()))
+          .accountsPartial({
+            funder,
+            vault,
+            systemProgram: SystemProgram.programId,
+          })
+          .instruction();
+        const signature = await send([ix]);
+        await refresh();
+        return signature;
+      } finally {
+        setAction('idle');
+      }
+    },
+    [connection, refresh, requireWallet, send],
+  );
+
+  return {
+    action,
+    createAndSeed,
+    seedExistingVault,
+    activateVault,
+    publishPlan,
+    setStrategy,
+    proposeStrategy,
+    fundGas,
+    executeRebalance,
+  };
 }
+

@@ -17,6 +17,9 @@ idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 anchor-debug = []
 custom-heap = []
 custom-panic = []
+# Short governance clocks for the devnet demo: 1 voting "day" = 60 s, timelock 2 min,
+# rebalance every 5 min. Never build a mainnet program with it.
+demo = []
 
 [dependencies]
 anchor-lang = { version = "1.2.1", features = ["init-if-needed"] }
@@ -35,3 +38,5 @@ solana-keypair = "3.0.1"
 ed25519-dalek = "2"
 mock_router = { path = "../mock_router", features = ["no-entrypoint"] }
 solana-account = "3"
+
+

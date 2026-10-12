@@ -10,7 +10,11 @@ import {formatUnits} from '@/lib/domain/format';
 import {resolveToken} from './tokenMetadata';
 import type {ActivityItem, HistoryResponse} from './types';
 
-const SIGNATURES_PER_VAULT = 40;
+const SIGNATURES_PER_VAULT = 15;
+const CHUNK_SIZE = 4;
+
+// Cache parsed activities by transaction signature to avoid re-querying immutable history
+const txCache = new Map<string, ActivityItem[]>();
 
 interface VaultInfo {
   address: string;
@@ -39,99 +43,146 @@ const key = (v: unknown) => (v as PublicKey).toBase58();
 
 export async function fetchHistory(options?: {vault?: string; account?: string; limit?: number}): Promise<HistoryResponse> {
   const conn = connection();
-  // The program's coder uses the camelCase IDL, so events arrive as `planPosted`, `sellMint`, ...
-  const parser = new EventParser(FOLIO_PROGRAM_ID, folioProgram(conn).coder);
-  const vaults = await vaultsToScan(options?.vault);
+  let latestBlock = 0;
+  try {
+    latestBlock = await conn.getSlot();
+  } catch {
+    // ignore slot error
+  }
+
+  let vaults: VaultInfo[] = [];
+  try {
+    vaults = await vaultsToScan(options?.vault);
+  } catch (err) {
+    console.warn('[history] vaultsToScan failed:', err);
+    return {items: [], latestBlock};
+  }
+
   const names = new Map(vaults.map((v) => [v.address, v.name]));
   const account = options?.account ?? null;
 
-  const signatures = (
-    await Promise.all(vaults.map((v) => conn.getSignaturesForAddress(new PublicKey(v.address), {limit: SIGNATURES_PER_VAULT})))
-  )
-    .flat()
-    .filter((s) => !s.err);
+  let signatures: {signature: string; slot: number; blockTime?: number | null}[] = [];
+  try {
+    signatures = (
+      await Promise.all(vaults.map((v) => conn.getSignaturesForAddress(new PublicKey(v.address), {limit: SIGNATURES_PER_VAULT})))
+    )
+      .flat()
+      .filter((s) => !s.err);
+  } catch (err) {
+    console.warn('[history] getSignaturesForAddress failed:', err);
+  }
+
   const unique = [...new Map(signatures.map((s) => [s.signature, s])).values()];
-  const txs = await conn.getTransactions(
-    unique.map((s) => s.signature),
-    {commitment: 'confirmed', maxSupportedTransactionVersion: 0},
-  );
+  unique.sort((a, b) => b.slot - a.slot);
 
-  const items: ActivityItem[] = [];
-  txs.forEach((tx, t) => {
-    if (!tx?.meta?.logMessages) return;
-    const sig = unique[t].signature;
-    const base = (vault: string, n: number) => ({
-      id: `${sig}:${n}`,
-      vault,
-      vaultName: names.get(vault) ?? 'Folio Vault',
-      vaultSymbol: 'FOLIO',
-      txHash: sig,
-      blockNumber: tx.slot,
-      timestamp: (tx.blockTime ?? 0) * 1000,
-    });
-    let n = 0;
-    for (const event of parser.parseLogs(tx.meta.logMessages)) {
-      const d = event.data as EventData;
-      const vault = key(d.vault);
-      if (!names.has(vault)) continue;
-      n += 1;
-      switch (event.name) {
-        case 'seeded':
-          if (account && key(d.investor) !== account) break;
-          items.push({...base(vault, n), type: 'seed', investor: key(d.investor), usdcAmount: usd(d.amount), sharesMinted: usd(d.shares)});
-          break;
-        case 'deposited':
-          if (account && key(d.investor) !== account) break;
-          items.push({
-            ...base(vault, n),
-            type: 'deposit',
-            investor: key(d.investor),
-            usdcAmount: usd(d.amount),
-            sharesMinted: usd(d.shares),
-            priceTimestamp: Number(str(d.priceTimestamp)) * 1000,
-          });
-          break;
-        case 'redeemed': {
-          if (account && key(d.investor) !== account) break;
-          const mints = (d.mints as PublicKey[]).map((m) => m.toBase58());
-          const amounts = (d.amounts as unknown[]).map(str);
-          items.push({
-            ...base(vault, n),
-            type: 'redeem',
-            investor: key(d.investor),
-            sharesBurned: usd(d.shares),
-            payouts: mints.map((asset, i) => {
-              const meta = resolveToken(asset);
-              return {asset, ...meta, amount: formatUnits(amounts[i], meta.decimals)};
-            }),
-          });
-          break;
-        }
-        case 'rebalanced': {
-          if (account) break; // a vault-level trade, not the account's own action
-          const [sell, buy] = [key(d.sellMint), key(d.buyMint)];
-          items.push({
-            ...base(vault, n),
-            type: 'rebalance',
-            sellToken: sell,
-            sellSymbol: resolveToken(sell).symbol,
-            sellAmount: formatUnits(str(d.sold), resolveToken(sell).decimals),
-            buyToken: buy,
-            buySymbol: resolveToken(buy).symbol,
-            buyAmount: formatUnits(str(d.bought), resolveToken(buy).decimals),
-            planVersion: Number(str(d.planVersion)),
-          });
-          break;
-        }
-        case 'planPosted':
-          if (account) break;
-          items.push({...base(vault, n), type: 'plan', version: Number(str(d.version)), planText: String(d.plan)});
-          break;
-      }
-    }
-  });
-
-  items.sort((a, b) => b.blockNumber - a.blockNumber || b.id.localeCompare(a.id));
   const limit = options?.limit ?? 50;
-  return {items: items.slice(0, limit), latestBlock: await conn.getSlot()};
+  const toFetch = unique.slice(0, limit).filter((s) => !txCache.has(s.signature));
+
+  // Fetch uncached transactions in small chunks to avoid RPC 429 errors
+  const parser = new EventParser(FOLIO_PROGRAM_ID, folioProgram(conn).coder);
+  for (let i = 0; i < toFetch.length; i += CHUNK_SIZE) {
+    const chunk = toFetch.slice(i, i + CHUNK_SIZE);
+    try {
+      const txs = await conn.getTransactions(
+        chunk.map((s) => s.signature),
+        {commitment: 'confirmed', maxSupportedTransactionVersion: 0},
+      );
+
+      txs.forEach((tx, t) => {
+        const sig = chunk[t].signature;
+        if (!tx?.meta?.logMessages) {
+          txCache.set(sig, []);
+          return;
+        }
+
+        const txItems: ActivityItem[] = [];
+        const base = (vault: string, n: number) => ({
+          id: `${sig}:${n}`,
+          vault,
+          vaultName: names.get(vault) ?? 'Folio Vault',
+          vaultSymbol: 'FOLIO',
+          txHash: sig,
+          blockNumber: tx.slot,
+          timestamp: (tx.blockTime ?? 0) * 1000,
+        });
+
+        let n = 0;
+        for (const event of parser.parseLogs(tx.meta.logMessages)) {
+          const d = event.data as EventData;
+          const vault = key(d.vault);
+          if (!names.has(vault)) continue;
+          n += 1;
+          switch (event.name) {
+            case 'seeded':
+              txItems.push({...base(vault, n), type: 'seed', investor: key(d.investor), usdcAmount: usd(d.amount), sharesMinted: usd(d.shares)});
+              break;
+            case 'deposited':
+              txItems.push({
+                ...base(vault, n),
+                type: 'deposit',
+                investor: key(d.investor),
+                usdcAmount: usd(d.amount),
+                sharesMinted: usd(d.shares),
+                priceTimestamp: Number(str(d.priceTimestamp)) * 1000,
+              });
+              break;
+            case 'redeemed': {
+              const mints = (d.mints as PublicKey[]).map((m) => m.toBase58());
+              const amounts = (d.amounts as unknown[]).map(str);
+              txItems.push({
+                ...base(vault, n),
+                type: 'redeem',
+                investor: key(d.investor),
+                sharesBurned: usd(d.shares),
+                payouts: mints.map((asset, i) => {
+                  const meta = resolveToken(asset);
+                  return {asset, ...meta, amount: formatUnits(amounts[i], meta.decimals)};
+                }),
+              });
+              break;
+            }
+            case 'rebalanced': {
+              const [sell, buy] = [key(d.sellMint), key(d.buyMint)];
+              txItems.push({
+                ...base(vault, n),
+                type: 'rebalance',
+                sellToken: sell,
+                sellSymbol: resolveToken(sell).symbol,
+                sellAmount: formatUnits(str(d.sold), resolveToken(sell).decimals),
+                buyToken: buy,
+                buySymbol: resolveToken(buy).symbol,
+                buyAmount: formatUnits(str(d.bought), resolveToken(buy).decimals),
+                planVersion: Number(str(d.planVersion)),
+              });
+              break;
+            }
+            case 'planPosted':
+              txItems.push({...base(vault, n), type: 'plan', version: Number(str(d.version)), planText: String(d.plan)});
+              break;
+          }
+        }
+        txCache.set(sig, txItems);
+      });
+    } catch (err) {
+      console.warn('[history] Failed to fetch transaction chunk (rate-limited):', err);
+      break;
+    }
+  }
+
+  const allItems: ActivityItem[] = [];
+  for (const s of unique) {
+    const cached = txCache.get(s.signature);
+    if (!cached) continue;
+    for (const item of cached) {
+      item.vaultName = names.get(item.vault) ?? item.vaultName;
+      if (account) {
+        if ('investor' in item && item.investor !== account) continue;
+        if (item.type === 'rebalance' || item.type === 'plan') continue;
+      }
+      allItems.push(item);
+    }
+  }
+
+  allItems.sort((a, b) => b.blockNumber - a.blockNumber || b.id.localeCompare(a.id));
+  return {items: allItems.slice(0, limit), latestBlock};
 }

@@ -5,7 +5,7 @@ use solana_instructions_sysvar as ix_sysvar;
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
-use super::holdings::{load_holdings, read_token_account, value_of};
+use super::holdings::{load_holdings, read_token_account, value_of, vault_value};
 use super::{PlanPosted, Rebalanced};
 use crate::errors::FolioError;
 use crate::prices::{check_prices, PriceUpdate};
@@ -14,27 +14,57 @@ use crate::state::*;
 #[derive(Accounts)]
 pub struct ManagerOnly<'info> {
     pub manager: Signer<'info>,
-    #[account(mut, has_one = manager @ FolioError::NotManager)]
+    #[account(seeds = [REGISTRY_SEED], bump = registry.bump)]
+    pub registry: Account<'info, Registry>,
+    #[account(mut, has_one = manager @ FolioError::NotManager, has_one = registry)]
     pub vault: Account<'info, Vault>,
 }
 
-/// Publish (or replace) the investment plan. Any text; investors read it and decide.
-pub fn handle_set_plan(ctx: Context<ManagerOnly>, text: String) -> Result<()> {
+/// Checks a target list: allowlisted, distinct mints, every weight above zero, summing to 100%.
+pub fn validate_targets(registry: &Registry, targets: &[Target]) -> Result<()> {
+    require!(!targets.is_empty() && targets.len() <= MAX_ASSETS, FolioError::InvalidTargets);
+    let mut sum: u32 = 0;
+    for (i, t) in targets.iter().enumerate() {
+        require!(t.bps > 0, FolioError::InvalidTargets);
+        require!(registry.is_asset(&t.mint), FolioError::AssetNotAllowed);
+        require!(!targets[..i].iter().any(|o| o.mint == t.mint), FolioError::InvalidTargets);
+        sum += t.bps as u32;
+    }
+    require!(sum == TOTAL_BPS as u32, FolioError::InvalidTargets);
+    Ok(())
+}
+
+pub fn validate_plan(text: &str) -> Result<()> {
     require!(!text.is_empty() && text.len() <= MAX_PLAN_LENGTH, FolioError::InvalidPlanLength);
+    Ok(())
+}
+
+/// Publish the plan and its target weights. Only before activation: once investors can join,
+/// the strategy changes only through a passed proposal.
+pub fn handle_set_strategy(ctx: Context<ManagerOnly>, text: String, targets: Vec<Target>) -> Result<()> {
+    validate_plan(&text)?;
+    validate_targets(&ctx.accounts.registry, &targets)?;
     let vault = &mut ctx.accounts.vault;
+    require!(
+        vault.state == VaultState::Draft || vault.state == VaultState::Seeded,
+        FolioError::StrategyLocked
+    );
     vault.plan = text.clone();
+    vault.targets = targets.clone();
     vault.plan_version += 1;
-    emit!(PlanPosted { vault: vault.key(), version: vault.plan_version, plan: text });
+    emit!(PlanPosted { vault: vault.key(), version: vault.plan_version, plan: text, targets });
     Ok(())
 }
 
 #[derive(Accounts)]
 pub struct Rebalance<'info> {
-    #[account(mut)]
-    pub manager: Signer<'info>,
+    /// The registry's keeper. Pays the transaction and any new token account, and is paid back a
+    /// flat fee from the vault's gas tank.
+    #[account(mut, address = registry.keeper @ FolioError::NotKeeper)]
+    pub keeper: Signer<'info>,
     #[account(seeds = [REGISTRY_SEED], bump = registry.bump)]
     pub registry: Box<Account<'info, Registry>>,
-    #[account(mut, has_one = manager @ FolioError::NotManager, has_one = registry)]
+    #[account(mut, has_one = registry)]
     pub vault: Box<Account<'info, Vault>>,
     #[account(mint::token_program = sell_token_program)]
     pub sell_mint: Box<InterfaceAccount<'info, Mint>>,
@@ -49,7 +79,7 @@ pub struct Rebalance<'info> {
     pub vault_sell: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(
         init_if_needed,
-        payer = manager,
+        payer = keeper,
         associated_token::mint = buy_mint,
         associated_token::authority = vault,
         associated_token::token_program = buy_token_program,
@@ -67,10 +97,14 @@ pub struct Rebalance<'info> {
     pub instructions: UncheckedAccount<'info>,
 }
 
-/// Swap one held token for another through an allowlisted swap program. The route data is opaque,
-/// so the vault judges the trade only by its own accounts afterwards: it sold at most `max_sell`,
-/// got at least `min_buy`, lost at most 2% of value at the signed prices, nothing else it holds
-/// went down, and no held account gained a delegate, close authority or new owner.
+/// One swap toward the vault's target weights, run by the keeper. Nobody chooses what to buy:
+/// the program refuses any trade that does not sell an overweight holding for an underweight
+/// target asset, or that overshoots either target. On top of that, the V1 checks still hold: it
+/// sold at most `max_sell`, got at least `min_buy`, lost at most 2% at the signed prices, nothing
+/// else went down, and no held account gained a delegate, close authority or new owner.
+///
+/// Swaps run in cycles: a new cycle may start once every REBALANCE_INTERVAL (12 h), and the
+/// keeper may send several swaps within REBALANCE_WINDOW of its start to finish it.
 pub fn handle_rebalance<'info>(
     ctx: Context<'info, Rebalance<'info>>,
     max_sell: u64,
@@ -85,17 +119,36 @@ pub fn handle_rebalance<'info>(
     let settlement = a.vault.settlement_mint;
 
     require!(a.vault.state == VaultState::Active, FolioError::WrongState);
-    require!(a.vault.plan_version > 0, FolioError::NoPlanPosted);
+    require!(!a.vault.targets.is_empty(), FolioError::NoPlanPosted);
     require!(a.registry.is_router(a.router.key), FolioError::RouterNotAllowed);
     require!(sell != buy && a.registry.is_asset(&buy), FolioError::AssetNotAllowed);
     require!(a.vault.held.contains(&sell), FolioError::AssetNotHeld);
+    require!(a.vault.gas_tank >= KEEPER_FEE_LAMPORTS, FolioError::GasTankEmpty);
     check_prices(&prices, &a.registry.key(), &a.registry, &a.instructions.to_account_info())?;
+
+    let now = Clock::get()?.unix_timestamp;
+    let new_cycle = a.vault.cycle_start == 0 || now >= a.vault.cycle_start + REBALANCE_INTERVAL;
+    require!(new_cycle || now <= a.vault.cycle_start + REBALANCE_WINDOW, FolioError::RebalanceTooSoon);
 
     let held_len = a.vault.held.len() * 2;
     let holdings = load_holdings(&vault_key, &a.vault, ctx.remaining_accounts, 2)?;
     let route_accounts = &ctx.remaining_accounts[held_len..];
     let sell_before = a.vault_sell.amount;
     let buy_before = a.vault_buy.amount;
+
+    // Direction: sell must sit above its target by more than the drift band, buy below its own.
+    let mut total = vault_value(&prices, &settlement, &holdings)?;
+    if !a.vault.held.contains(&buy) && buy_before > 0 {
+        total += value_of(&prices, &settlement, &buy, a.buy_mint.decimals, buy_before, true)?;
+    }
+    require!(total > 0, FolioError::EmptyVault);
+    let t_sell = a.vault.target_bps(&sell) as u128;
+    let t_buy = a.vault.target_bps(&buy) as u128;
+    require!(t_buy > 0, FolioError::BuyNotUnderweight);
+    let sell_value = value_of(&prices, &settlement, &sell, a.sell_mint.decimals, sell_before, false)?;
+    let buy_value = value_of(&prices, &settlement, &buy, a.buy_mint.decimals, buy_before, false)?;
+    require!(sell_value * 10_000 > (t_sell + DRIFT_BAND_BPS) * total, FolioError::SellNotOverweight);
+    require!(buy_value * 10_000 < t_buy * total, FolioError::BuyNotUnderweight);
 
     // The vault PDA signs for the router, exactly where the route lists the vault.
     let metas: Vec<AccountMeta> = route_accounts
@@ -142,9 +195,19 @@ pub fn handle_rebalance<'info>(
         FolioError::TradeLossTooHigh
     );
 
+    // No overshoot: neither side may end up past its target by more than the band.
+    let sell_after_value = value_of(&prices, &settlement, &sell, a.sell_mint.decimals, sell_after, true)?;
+    let buy_after_value = value_of(&prices, &settlement, &buy, a.buy_mint.decimals, buy_after, false)?;
+    require!(
+        sell_after_value * 10_000 + DRIFT_BAND_BPS * total >= t_sell * total,
+        FolioError::TargetOvershoot
+    );
+    require!(buy_after_value * 10_000 <= (t_buy + DRIFT_BAND_BPS) * total, FolioError::TargetOvershoot);
+
     // Drop first, so a full vault can still swap one stock entirely into a new one.
     let dust = 10u64.pow(a.sell_mint.decimals as u32) / DUST_DIVISOR;
     let plan_version = a.vault.plan_version;
+    let keeper_info = a.keeper.to_account_info();
     let vault = &mut ctx.accounts.vault;
     if sell != settlement && sell_after <= dust {
         vault.held.retain(|m| *m != sell);
@@ -153,6 +216,15 @@ pub fn handle_rebalance<'info>(
         require!(vault.held.len() < MAX_ASSETS, FolioError::TooManyAssets);
         vault.held.push(buy);
     }
+    if new_cycle {
+        vault.cycle_start = now;
+    }
+
+    // Pay the keeper back from the gas tank (lamports on the vault account above its rent).
+    vault.gas_tank -= KEEPER_FEE_LAMPORTS;
+    let vault_info = vault.to_account_info();
+    **vault_info.try_borrow_mut_lamports()? -= KEEPER_FEE_LAMPORTS;
+    **keeper_info.try_borrow_mut_lamports()? += KEEPER_FEE_LAMPORTS;
 
     emit!(Rebalanced { vault: vault_key, sell_mint: sell, buy_mint: buy, sold, bought, plan_version });
     Ok(())

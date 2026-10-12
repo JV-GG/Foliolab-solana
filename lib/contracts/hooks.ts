@@ -289,3 +289,165 @@ export function useTokenBalance(mint: string | undefined) {
     refetchInterval: 10_000,
   });
 }
+
+/** Vote on an active proposal with frozen snapshot voting power */
+export function useVote() {
+  const {connection} = useSolanaConnection();
+  const queryClient = useQueryClient();
+  const {address} = useConnection();
+  const send = useSendTransaction();
+  const [pending, setPending] = useState(false);
+
+  const vote = useCallback(
+    async (vaultAddress: string, proposalAddress: string, isYes: boolean) => {
+      if (!address) throw new Error('Connect a wallet first.');
+      setPending(true);
+      try {
+        const voter = new PublicKey(address);
+        const vault = new PublicKey(vaultAddress);
+        const proposal = new PublicKey(proposalAddress);
+        const program = folioProgram(connection);
+
+        const ix = await program.methods
+          .vote(isYes)
+          .accountsPartial({
+            voter,
+            vault,
+            proposal,
+            position: positionPda(vault, voter),
+            voteRecord: PublicKey.findProgramAddressSync(
+              [Buffer.from('vote'), proposal.toBuffer(), voter.toBuffer()],
+              program.programId,
+            )[0],
+            systemProgram: SystemProgram.programId,
+          })
+          .instruction();
+
+        await send([ix]);
+        await queryClient.invalidateQueries({queryKey: [VAULTS_KEY]});
+      } finally {
+        setPending(false);
+      }
+    },
+    [address, connection, queryClient, send],
+  );
+
+  return {vote, pending};
+}
+
+/** Finalize voting once voting period ends: refunds bond if rejected, unlocks timelock if passed */
+export function useFinalizeProposal() {
+  const {connection} = useSolanaConnection();
+  const queryClient = useQueryClient();
+  const {address} = useConnection();
+  const send = useSendTransaction();
+  const [pending, setPending] = useState(false);
+
+  const finalize = useCallback(
+    async (vaultAddress: string, proposalAddress: string, proposerAddress: string) => {
+      if (!address) throw new Error('Connect a wallet first.');
+      setPending(true);
+      try {
+        const caller = new PublicKey(address);
+        const vault = new PublicKey(vaultAddress);
+        const proposal = new PublicKey(proposalAddress);
+        const proposer = new PublicKey(proposerAddress);
+        const program = folioProgram(connection);
+
+        const ix = await program.methods
+          .finalize()
+          .accountsPartial({
+            vault,
+            proposal,
+            proposer,
+          })
+          .instruction();
+
+        await send([ix]);
+        await queryClient.invalidateQueries({queryKey: [VAULTS_KEY]});
+      } finally {
+        setPending(false);
+      }
+    },
+    [address, connection, queryClient, send],
+  );
+
+  return {finalize, pending};
+}
+
+/** Execute proposal after 48h timelock ends: applies new target weights and moves bond to gas tank */
+export function useExecuteProposal() {
+  const {connection} = useSolanaConnection();
+  const queryClient = useQueryClient();
+  const {address} = useConnection();
+  const send = useSendTransaction();
+  const [pending, setPending] = useState(false);
+
+  const execute = useCallback(
+    async (vaultAddress: string, proposalAddress: string) => {
+      if (!address) throw new Error('Connect a wallet first.');
+      setPending(true);
+      try {
+        const vault = new PublicKey(vaultAddress);
+        const proposal = new PublicKey(proposalAddress);
+        const program = folioProgram(connection);
+
+        const ix = await program.methods
+          .execute()
+          .accountsPartial({
+            vault,
+            proposal,
+          })
+          .instruction();
+
+
+        await send([ix]);
+        await queryClient.invalidateQueries({queryKey: [VAULTS_KEY]});
+      } finally {
+        setPending(false);
+      }
+    },
+    [address, connection, queryClient, send],
+  );
+
+  return {execute, pending};
+}
+
+/** Top up vault gas tank with SOL to reimburse future autonomous keeper rebalances */
+export function useFundGas() {
+  const {connection} = useSolanaConnection();
+  const queryClient = useQueryClient();
+  const {address} = useConnection();
+  const send = useSendTransaction();
+  const [pending, setPending] = useState(false);
+
+  const fundGas = useCallback(
+    async (vaultAddress: string, lamports: number | bigint | BN) => {
+      if (!address) throw new Error('Connect a wallet first.');
+      setPending(true);
+      try {
+        const funder = new PublicKey(address);
+        const vault = new PublicKey(vaultAddress);
+        const program = folioProgram(connection);
+
+        const ix = await program.methods
+          .fundGas(new BN(lamports.toString()))
+          .accountsPartial({
+            funder,
+            vault,
+            systemProgram: SystemProgram.programId,
+          })
+          .instruction();
+
+        await send([ix]);
+        await queryClient.invalidateQueries({queryKey: [VAULTS_KEY]});
+      } finally {
+        setPending(false);
+      }
+    },
+    [address, connection, queryClient, send],
+  );
+
+  return {fundGas, pending};
+}
+

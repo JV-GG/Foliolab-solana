@@ -34,6 +34,7 @@ pub fn handle_initialize_registry(
     r.routers = Vec::new();
     r.vault_count = 0;
     r.bump = ctx.bumps.registry;
+    r.keeper = guardian;
     Ok(())
 }
 
@@ -82,5 +83,11 @@ pub fn handle_set_guardian(ctx: Context<AdminOnly>, guardian: Pubkey) -> Result<
 
 pub fn handle_set_price_signer(ctx: Context<AdminOnly>, signer: Pubkey) -> Result<()> {
     ctx.accounts.registry.price_signer = signer;
+    Ok(())
+}
+
+/// The automation key that runs target-weight rebalances.
+pub fn handle_set_keeper(ctx: Context<AdminOnly>, keeper: Pubkey) -> Result<()> {
+    ctx.accounts.registry.keeper = keeper;
     Ok(())
 }
