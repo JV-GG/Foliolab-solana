@@ -35,7 +35,7 @@ export interface PriceRules {
    * When true, a token Binance does not report as trading is refused.
    *
    * Decided 10 Oct 2026: this checks the TOKEN's status (`reasonCode`), not the US market's
-   * (`marketStatus`). Ondo tokens keep trading off-hours and at weekends, and deposits are
+   * (`marketStatus`). Tokenized stocks keep trading off-hours and at weekends, and deposits are
    * allowed then; the divergence check against the reference price is the guard.
    */
   requireOpenMarket: boolean;
@@ -43,7 +43,7 @@ export interface PriceRules {
 
 /** Decides whether one Binance row is safe to sign. */
 export function judgeQuote(token: RwaToken | undefined, rules: PriceRules): Verdict {
-  if (!token) return {ok: false, reason: 'not listed by Binance on BSC'};
+  if (!token) return {ok: false, reason: 'no market price for this stock'};
 
   const status = token.statusInfo;
   if (rules.requireOpenMarket && !(status?.openState && status.reasonCode === 'TRADING')) {

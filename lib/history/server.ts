@@ -78,7 +78,7 @@ export async function fetchHistory(options?: {vault?: string; account?: string; 
       switch (event.name) {
         case 'seeded':
           if (account && key(d.investor) !== account) break;
-          items.push({...base(vault, n), type: 'seed', investor: key(d.investor), usdtAmount: usd(d.amount), sharesMinted: usd(d.shares)});
+          items.push({...base(vault, n), type: 'seed', investor: key(d.investor), usdcAmount: usd(d.amount), sharesMinted: usd(d.shares)});
           break;
         case 'deposited':
           if (account && key(d.investor) !== account) break;
@@ -86,7 +86,7 @@ export async function fetchHistory(options?: {vault?: string; account?: string; 
             ...base(vault, n),
             type: 'deposit',
             investor: key(d.investor),
-            usdtAmount: usd(d.amount),
+            usdcAmount: usd(d.amount),
             sharesMinted: usd(d.shares),
             priceTimestamp: Number(str(d.priceTimestamp)) * 1000,
           });

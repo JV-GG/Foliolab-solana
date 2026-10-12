@@ -282,7 +282,7 @@ function renderActivityContent(item: ActivityItem) {
     case 'deposit':
       return (
         <span>
-          Deposited <strong className={strong}>{formatDecimal(item.usdtAmount)} USDC</strong> into the vault and minted{' '}
+          Deposited <strong className={strong}>{formatDecimal(item.usdcAmount)} USDC</strong> into the vault and minted{' '}
           <strong className={strong}>{formatDecimal(item.sharesMinted)} shares</strong>
           <span className="ml-1 text-[#7b847c]">by {shortAddress(item.investor)}</span>
         </span>
@@ -318,7 +318,7 @@ function renderActivityContent(item: ActivityItem) {
     case 'seed':
       return (
         <span>
-          Seeded with <strong className={strong}>{formatDecimal(item.usdtAmount)} USDC</strong> and minted{' '}
+          Seeded with <strong className={strong}>{formatDecimal(item.usdcAmount)} USDC</strong> and minted{' '}
           <strong className={strong}>{formatDecimal(item.sharesMinted)} initial shares</strong>
         </span>
       );

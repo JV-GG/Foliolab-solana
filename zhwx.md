@@ -11,36 +11,57 @@ written so you can pick one and do it.
   into approved stock tokens. Guarantees: the curator can trade but never withdraw; any holder can
   always withdraw their percentage of every holding (even when paused); deposits never dilute holders;
   each trade loses at most 2% against signed prices.
-- It was first built for the **BNB Chain** hackathon (Solidity + Next.js) in the `bnb-hack` repo.
 - This repo (`Foliolab-solana`) is the **Solana port** for a Solana-track hackathon. The deadline was
   given as 11 Oct 2026; confirm the exact submission time with the team.
 - Decisions taken:
   - Run on **devnet** with **mock stock tokens** and a **mock swap program** (`mock_router`). The
     real stock tokens (e.g. xStocks) and Jupiter liquidity exist only on mainnet.
-  - Keep **backend-signed prices**, now **ed25519**-signed instead of EIP-712 (no Pyth for now).
+  - **Backend-signed prices** (ed25519), checked on-chain. Pyth's price API now needs an API key, so it
+    is a later swap in `lib/pricing/source.ts`.
   - Next.js app stays at the repo root; the Solana programs live in `anchor/`.
-  - Stablecoin is **USDC** (6 decimals), not USDT.
+  - Stablecoin is **USDC** (6 decimals).
 
 ## Status at a glance (12 Oct 2026)
 
-- ✅ **Built and working locally:** Solana program, setup script, backend API, investor UI, curator UI.
-  Proven end to end on a local validator (faucet → deposit → rebalance → withdraw).
-- ⚠️ **Not committed yet.** All of the backend/frontend port is still uncommitted on Jun Voon's Mac.
-  Until it is pushed, teammates pulling the repo will still see the old BNB backend and frontend.
-- ❌ **Not on devnet yet.** The deploy wallet has 0 SOL (the CLI faucet is rate-limited).
-- ❌ **Not on Vercel, no demo video, no DX report.**
+- ✅ **Built:** Solana program, setup script, backend API, investor UI, curator UI.
+- ✅ **Live on devnet:** programs deployed, mock tokens + registry + demo vault set up. The end-to-end
+  test (faucet → deposit → rebalance → withdraw) **passes on devnet**.
+- ✅ **No BNB left:** BNB explorer pages, EVM docs and BNB hackathon notes removed; `AGENTS.md`/`CLAUDE.md`
+  describe the Solana project. (Binance market data is still the off-chain price source.)
+- ⚠️ **Vercel shows the old BNB site** until branch `jv` is merged into `main` and the Vercel env vars
+  below are set.
+- ❌ No browser-wallet click-through yet, no demo video, no DX report.
+
+### Devnet addresses
+| What | Address |
+|---|---|
+| `folio_vault` program | `9PY9RRXQuMtHXDyvWNL5ohFrsSux5SLrJhhdtuBgLUJH` |
+| `mock_router` program | `FeE32TVg1Yk4DVe4jS3SELK13dQsbbDUWyY4dYKmQhjm` |
+| Registry | `4on5rPymYh1W7sLe6LA3WYwXBR2wgBG5KiqSrMucQHC1` |
+| Mock USDC | `DKg3JGudRDDWymeLhWVEjhfagNGi93SGYdRb7A8TuHdv` |
+| AAPLx | `AtVJpQjnBuhQwHFhdadj7TuNnbK2u4Aonu2wcZgGSBVJ` |
+| NVDAx | `E87tWL7sLcD5GrpcJkewquzri9Na2sJsrV5JcLt8Ce6g` |
+| TSLAx | `5qEVYEWHpL7sxuBH3EMHnNzjHfnUSMujuCbgfMNbxTH5` |
+| Demo vault "Big Tech Core" | `2cRhpsvAaLDE4e18rjrLczM1zBkwFMgZUU9mdNqWk4X9` |
+
+### Vercel environment variables (Production)
+`NEXT_PUBLIC_SOLANA_CLUSTER=devnet`, `NEXT_PUBLIC_SOLANA_RPC_URL` and `SOLANA_RPC_URL` (a dedicated devnet
+RPC such as Helius; the public one returns HTTP 429 under load), `PRICE_SIGNER_SECRET_KEY`,
+`GUARDIAN_SECRET_KEY`, `FAUCET_SECRET_KEY` (contents of `~/folio-price-signer.json`, `~/folio-guardian.json`,
+`~/folio-faucet.json` on Jun Voon's Mac), `BINANCE_WEB3_API_KEY`, `BINANCE_WEB3_API_SECRET`, and
+`PRICE_SOURCE=binance` (or `static` for fixed demo prices).
 
 ## 2. Done ✅
 
 | What | Where |
 |---|---|
-| Anchor workspace (Anchor **1.2.1**): `folio_vault` (all BNB features) + `mock_router` (Jupiter stand-in) | `anchor/` |
+| Anchor workspace (Anchor **1.2.1**): `folio_vault` (registry, vaults, deposit, redeem, plan, rebalance) + `mock_router` (Jupiter stand-in) | `anchor/` |
 | 11 LiteSVM program tests, **all passing** | `anchor/programs/folio_vault/tests/test_vault.rs` |
 | Shared TS client: IDLs, PDAs, token accounts, price message, Ed25519 instruction | `lib/solana/program.ts`, `lib/solana/idl/` |
 | Cluster config + address book (written by the setup script) | `lib/solana/config.ts`, `lib/solana/addresses.json` |
 | **Setup script**: mock USDC/AAPLx/NVDAx/TSLAx mints, registry, allowlist, guardian, router pool, demo vault (seeded, active, plan, one AAPLx buy). Idempotent. | `scripts/setup-solana.ts` (`npm run setup:solana`) |
-| **Backend on Solana** (no viem): `/api/prices` (ed25519), `/api/trade` (mock router route), `/api/vaults`, `/api/vaults/<v>`, `/api/history` (Anchor events), `/api/vaults/<v>/activate` (demo guardian), **new** `/api/faucet` (1,000 test USDC) | `app/api/**`, `lib/{chain,pricing,trade,vaults,history}` |
-| **Frontend on Solana** (no wagmi): wallet adapter (Phantom/Solflare/Backpack via Wallet Standard), deposit, withdraw, faucet button, curator create+seed (one tx), plan, rebalance, activate, Solana Explorer links, USDC wording | `app/providers.tsx`, `lib/contracts/{wallet,hooks}.ts`, `components/**` |
+| **Backend on Solana**: `/api/prices` (ed25519), `/api/trade` (mock router route), `/api/vaults`, `/api/vaults/<v>`, `/api/history` (Anchor events), `/api/vaults/<v>/activate` (demo guardian), **new** `/api/faucet` (1,000 test USDC) | `app/api/**`, `lib/{chain,pricing,trade,vaults,history}` |
+| **Frontend on Solana**: wallet adapter (Phantom/Solflare/Backpack via Wallet Standard), deposit, withdraw, faucet button, curator create+seed (one tx), plan, rebalance, activate, Solana Explorer links, USDC wording | `app/providers.tsx`, `lib/contracts/{wallet,hooks}.ts`, `components/**` |
 | **End-to-end smoke test** through the API: faucet → deposit → rebalance → redeem. **Passes on localnet.** | `scripts/smoke-solana.ts` (`npm run smoke:solana`) |
 | 29 unit tests pass (`npm test`); `next build` passes | — |
 | Local dev chain: `npm run validator` (programs preloaded) | `package.json` |
@@ -57,19 +78,17 @@ Keys on Jun Voon's Mac (outside the repo, never commit): deploy wallet `~/.confi
 
 | Area | State |
 |---|---|
-| **Devnet deployment** | Blocked on devnet SOL: the CLI faucet is rate-limited. Fund `63aD1FYX2TWAF4HR3wyrRhJsnvK7vJ9FwGhLFg2St7YR` with ~5 SOL at https://faucet.solana.com, then do Task 1. |
-| **Commit and push** | Not done: ~59 changed files on Jun Voon's Mac. |
+| Merge `jv` into `main` | Not done. |
 | Click-through test in a real browser wallet | Not done (the API + program flow is proven by the smoke test; the React screens compile and render). |
 | Live Binance prices | Untested on Solana: local runs used `PRICE_SOURCE=static`. Mock tokens are priced from the underlying ticker (AAPLx → AAPL) via the Binance RWA listing; if the market is closed, signing is refused unless `PRICE_REQUIRE_OPEN_MARKET=false` or `PRICE_SOURCE=static`. |
-| Vercel deploy | Not done (needs the devnet deploy first). |
-| Root `AGENTS.md` / `CLAUDE.md` | Still describe the BNB project. |
+| Vercel serving the Solana build | Merge `jv` → `main` and set the env vars above. |
 | Malicious-router test | Not written. The checks exist in code. |
 | Real Jupiter swap (mainnet) | Not attempted. `/api/trade` returns 501 on mainnet. |
 | Demo video, developer-experience report | Not started. **The DX report must be written by the team, not by AI.** |
 
 ## 4. To do, in priority order
 
-### Task 1 — Deploy to devnet (once the wallet has SOL)
+### Task 1 — Redeploy to devnet (done 12 Oct; only if the program changes)
 ```sh
 export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.local/share/agave/solana-release/bin:$PATH"
 cd anchor && anchor build --arch v0 && anchor deploy --provider.cluster devnet && cd ..
@@ -109,7 +128,7 @@ recommended), the three secret keys, Binance keys, `PRICE_SOURCE=binance` (or `s
 closed during judging and Binance refuses to sign). Deploy, then put the URL and demo tx links in `README.md`.
 
 ### Task 4 — Submission
-Demo video; developer-experience report (team-written); update `AGENTS.md`.
+Demo video; developer-experience report (team-written).
 
 ### Task 5 — Nice to have
 Malicious-router test; Jupiter route for mainnet in `lib/trade/build.ts`; Pyth prices instead of the signer.

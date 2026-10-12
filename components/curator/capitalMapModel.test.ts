@@ -3,11 +3,11 @@ import type {Holding} from '@/lib/contracts/hooks';
 import {assetAssignments, assetColor, assetMix, generateIslandTerrain, sharePartsPerMillion, territoryCellCount} from './capitalMapModel';
 import {allocateTerritories, type MapHolder} from './useIslandOverlay';
 
-const USDT = '0x55d398326f99059fF775485246999027B3197955';
-const STOCK = '0x390a684EF9cADE28A7AD0DFa61AB1Eb3842618c4';
+const USDC = 'DKg3JGudRDDWymeLhWVEjhfagNGi93SGYdRb7A8TuHdv';
+const STOCK = 'AtVJpQjnBuhQwHFhdadj7TuNnbK2u4Aonu2wcZgGSBVJ';
 
 function holding(asset: string, amount: string, valueUsd: string | null): Holding {
-  return {asset: asset as Holding['asset'], symbol: asset === USDT ? 'USDT' : 'AAPLon', decimals: 18, amount, priceUsd: valueUsd, valueUsd};
+  return {asset: asset as Holding['asset'], symbol: asset === USDC ? 'USDC' : 'AAPLx', decimals: 6, amount, priceUsd: valueUsd, valueUsd};
 }
 
 describe('capital map data rules', () => {
@@ -22,26 +22,26 @@ describe('capital map data rules', () => {
   });
 
   it('does not treat an unpriced non-zero asset as zero allocation', () => {
-    expect(assetMix([holding(USDT, '100', '100'), holding(STOCK, '1', null)]).status).toBe('unpriced');
+    expect(assetMix([holding(USDC, '100', '100'), holding(STOCK, '1', null)]).status).toBe('unpriced');
   });
 
   it('ignores zero balances when deciding whether the mix is complete', () => {
-    expect(assetMix([holding(USDT, '100', '100'), holding(STOCK, '0', null)]).status).toBe('ready');
+    expect(assetMix([holding(USDC, '100', '100'), holding(STOCK, '0', null)]).status).toBe('ready');
   });
 
   it('uses stable colors and preserves the pixel total', () => {
-    const mix = assetMix([holding(USDT, '100', '75'), holding(STOCK, '100', '25')]);
+    const mix = assetMix([holding(USDC, '100', '75'), holding(STOCK, '100', '25')]);
     const first = assetAssignments(mix, 40, 'vault-a');
     const second = assetAssignments(mix, 40, 'vault-a');
     expect(first).toEqual(second);
     expect(first).toHaveLength(40);
-    expect(first?.filter((color) => color === assetColor(USDT))).toHaveLength(30);
+    expect(first?.filter((color) => color === assetColor(USDC))).toHaveLength(30);
     expect(first?.filter((color) => color === assetColor(STOCK))).toHaveLength(10);
   });
 
   it('generates stable but distinct terrain from each vault address', () => {
-    const first = generateIslandTerrain(USDT);
-    const repeated = generateIslandTerrain(USDT);
+    const first = generateIslandTerrain(USDC);
+    const repeated = generateIslandTerrain(USDC);
     const second = generateIslandTerrain(STOCK);
     expect(first).toEqual(repeated);
     expect(first.land.length).toBeGreaterThan(200);

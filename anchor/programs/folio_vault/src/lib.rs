@@ -1,11 +1,10 @@
 //! Folio Lab on Solana: a pooled portfolio of tokenized stocks.
 //!
-//! Port of the BNB `FolioVault` / `AssetRegistry` / `VaultFactory` contracts. Same guarantees:
-//! the manager can trade but never withdraw; any holder can always withdraw their percentage of
+//! Guarantees: the manager can trade but never withdraw; any holder can always withdraw their percentage of
 //! every holding (even when paused); deposits never dilute existing holders.
 //!
-//! Differences from the EVM version:
-//! - One program. The registry and each vault are PDAs; `create_vault` replaces the factory.
+//! Design:
+//! - One program. The registry and each vault are PDAs; anyone can `create_vault`.
 //! - Shares are a per-investor `Position` account, not a token, so they cannot be transferred.
 //! - Prices are signed by the backend with ed25519 and checked through the Ed25519 program's
 //!   instruction, which must sit directly before ours in the same transaction.

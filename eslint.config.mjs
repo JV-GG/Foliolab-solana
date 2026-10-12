@@ -12,12 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Vendored Solidity dependencies (git submodules) and captured API payloads
-    // are not our source and should not be linted.
-    "contracts/lib/**",
-    "contracts/out/**",
-    "api/responses/**",
-    "prototype/**",
+    // Anchor build output is not our source and should not be linted.
+    "anchor/target/**",
   ]),
 ]);
 

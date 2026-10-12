@@ -26,9 +26,6 @@ export function host(): string {
 }
 export const BASE_PATH = '/build';
 
-/** BSC mainnet. Everything here targets mainnet by design. */
-export const BSC_CHAIN_ID = 56;
-
 export interface Credentials {
   apiKey: string;
   secretKey: string;

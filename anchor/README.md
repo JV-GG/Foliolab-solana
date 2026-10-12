@@ -1,6 +1,6 @@
 # Folio Lab — Solana programs
 
-Anchor 1.2.1 port of the BNB contracts (`FolioVault`, `AssetRegistry`, `VaultFactory`).
+Anchor 1.2.1 programs for Folio Lab.
 
 | Program | What |
 |---|---|
@@ -16,17 +16,17 @@ anchor build --arch v0          # v0: Anchor 1.2 defaults to SBPF v3, which Lite
 cargo test -p folio_vault       # LiteSVM, no validator needed
 ```
 
-## How it maps from the EVM version
+## Accounts
 
-| EVM | Solana |
+| Account | What |
 |---|---|
-| `AssetRegistry` contract | `Registry` PDA, seeds `["registry"]` |
-| `VaultFactory.createVault` | `create_vault`; vault PDA seeds `["vault", registry, index u64 LE]` |
-| ERC-20 shares, transfers blocked | `Position` PDA per investor, seeds `["position", vault, owner]`; shares use USDC decimals |
-| EIP-712 `PriceUpdate` | ed25519 signature in an Ed25519 program instruction **directly before** ours (see below) |
-| `rebalance` calls router with calldata | CPI into an allowlisted program with the vault PDA as signer, then balance + authority checks |
+| `Registry` PDA, seeds `["registry"]` | admin, guardian, price signer, USDC mint, allowlisted stocks and swap programs |
+| `Vault` PDA, seeds `["vault", registry, index u64 LE]` | manager, state, total shares, plan, held mints; created by `create_vault` |
+| `Position` PDA, seeds `["position", vault, owner]` | one investor's shares (USDC decimals); not a token, so not transferable |
+| Prices | ed25519 signature in an Ed25519 program instruction **directly before** ours (see below) |
+| `rebalance` | CPI into an allowlisted program with the vault PDA as signer, then balance + authority checks |
 
-Same rules as BNB: 10 USDC minimum seed, 0.001 dead share, 60 s price age, 2% max trade loss,
+Rules: 10 USDC minimum seed, 0.001 dead share, 60 s price age, 2% max trade loss,
 max 10 held assets, plan 1–1000 bytes and required before the first trade, redeem works in any state.
 
 ## Signed prices

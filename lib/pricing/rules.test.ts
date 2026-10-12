@@ -10,7 +10,7 @@ function token(overrides: Partial<RwaToken> = {}): RwaToken {
     tokenContractAddress: '0x390a684ef9cade28a7ad0dfa61ab1eb3842618c4',
     platformId: 'ondo',
     tokenName: 'Apple (Ondo)',
-    tokenSymbol: 'AAPLon',
+    tokenSymbol: 'AAPLx',
     tokenLogoUrl: null,
     decimals: '18',
     underlyingTicker: 'AAPL',
@@ -103,18 +103,18 @@ describe('judgeQuote', () => {
 });
 
 describe('tradeLossPercent', () => {
-  const usdt = (n: number) => ({amount: BigInt(n) * BigInt(10) ** BigInt(18), decimals: 18, priceUsd: 1});
+  const usdc = (n: number) => ({amount: BigInt(n) * BigInt(10) ** BigInt(18), decimals: 18, priceUsd: 1});
 
   it('is the share of value given up', () => {
-    // 200 USDT for 0.5 of a $392 stock = $196, a 2% loss.
-    expect(tradeLossPercent(usdt(200), {amount: BigInt(5e17), decimals: 18, priceUsd: 392})).toBeCloseTo(2);
+    // 200 USDC for 0.5 of a $392 stock = $196, a 2% loss.
+    expect(tradeLossPercent(usdc(200), {amount: BigInt(5e17), decimals: 18, priceUsd: 392})).toBeCloseTo(2);
   });
 
   it('is negative when the trade gains', () => {
-    expect(tradeLossPercent(usdt(100), {amount: BigInt(1e18), decimals: 18, priceUsd: 101})).toBeCloseTo(-1);
+    expect(tradeLossPercent(usdc(100), {amount: BigInt(1e18), decimals: 18, priceUsd: 101})).toBeCloseTo(-1);
   });
 
   it('flags a route that returns almost nothing', () => {
-    expect(tradeLossPercent(usdt(200), {amount: BigInt(126344526547), decimals: 18, priceUsd: 541})).toBeGreaterThan(99);
+    expect(tradeLossPercent(usdc(200), {amount: BigInt(126344526547), decimals: 18, priceUsd: 541})).toBeGreaterThan(99);
   });
 });

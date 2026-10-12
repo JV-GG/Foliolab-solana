@@ -126,4 +126,4 @@ The earlier 10-days-per-engineer estimate no longer applies. First time-box SC-0
 | Who builds/connects the frontend and wallet signing client? | Vincent + Aik Wei to assign | Before committing the complete demo schedule |
 | Public offering/access and legal rights attached to shares | Founder with appropriate advisers | Separate production gate before accepting public investment |
 
-Source basis: [hackathon scope](../knowledge-base/06-bnb-hackathon.md), [product mechanics](../knowledge-base/03-product-and-mechanics.md), [risk register](../knowledge-base/04-risk-and-legal.md), and founder scope/ownership decisions recorded on 18 September 2026. This document specifies planned work; no contracts were deployed and no funds moved in preparing it.
+Source basis: [product mechanics](../knowledge-base/03-product-and-mechanics.md), [risk register](../knowledge-base/04-risk-and-legal.md), and founder scope/ownership decisions recorded on 18 September 2026. This document specifies planned work; no contracts were deployed and no funds moved in preparing it.

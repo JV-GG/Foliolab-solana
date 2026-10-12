@@ -18,7 +18,7 @@ export interface BaseActivity {
 export interface DepositActivity extends BaseActivity {
   type: 'deposit';
   investor: Address;
-  usdtAmount: string;
+  usdcAmount: string;
   sharesMinted: string;
   priceTimestamp?: number;
 }
@@ -57,7 +57,7 @@ export interface PlanActivity extends BaseActivity {
 export interface SeedActivity extends BaseActivity {
   type: 'seed';
   investor: Address;
-  usdtAmount: string;
+  usdcAmount: string;
   sharesMinted: string;
 }
 

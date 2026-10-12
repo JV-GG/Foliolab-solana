@@ -4,13 +4,13 @@
 
 A curator opens a vault and publishes, on-chain, a plan for what they intend to buy. Investors deposit USDC and receive vault shares. The curator invests the pooled USDC in tokenized stocks through an allowlisted swap program (Jupiter on mainnet; a mock router on devnet).
 
-Ported from our BNB Chain hackathon build (Solidity) to a Solana program in Rust (Anchor).
+Built for the Solana track: an Anchor program in Rust, a Next.js app, and devnet mock tokens that stand in for xStocks.
 
 | | |
 |---|---|
 | Live app | _Vercel URL: to be added_ |
 | Cluster | Solana devnet (mock stock tokens and mock router) |
-| Program | `folio_vault` — `9PY9RRXQuMtHXDyvWNL5ohFrsSux5SLrJhhdtuBgLUJH` (devnet deploy: to be added) |
+| Program | `folio_vault` — [`9PY9RRXQuMtHXDyvWNL5ohFrsSux5SLrJhhdtuBgLUJH`](https://explorer.solana.com/address/9PY9RRXQuMtHXDyvWNL5ohFrsSux5SLrJhhdtuBgLUJH?cluster=devnet) (devnet) |
 | Stack | Rust + Anchor 1.2.1 · LiteSVM tests · Next.js 16 + React 19 |
 
 ## What the program guarantees
@@ -50,10 +50,12 @@ Why prices are signed off-chain: these stock tokens have no reliable on-chain pr
 | `anchor/` | Anchor workspace: `folio_vault` and `mock_router` programs, LiteSVM tests. See [`anchor/README.md`](anchor/README.md). |
 | `app/api/` | Route handlers: `/api/prices`, `/api/trade`, `/api/vaults`, `/api/history` |
 | `lib/binance/` | Binance Web3 API client (price source) |
-| `lib/contracts/` | Program IDs, IDL and client hooks _(being ported from wagmi/viem)_ |
+| `lib/solana/` | IDLs, PDAs, signed-price helpers, cluster config and deployed addresses |
+| `lib/contracts/` | Wallet adapter wrapper and React hooks (deposit, withdraw, balances) |
+| `scripts/` | `setup-solana.ts` (tokens, registry, demo vault) and `smoke-solana.ts` (end-to-end check) |
 | `app/page.tsx`, `components/` | Investor app: vault list, vault page, deposit, withdraw |
 | `app/curator/`, `components/curator/` | Curator console: create, seed, plan, rebalance |
-| `docs/` | Contract spec and product requirements (EVM version) |
+| `docs/` | Product requirements |
 
 ## Run it locally
 
@@ -95,8 +97,8 @@ CLUSTER=devnet npm run setup:solana
 |---|---|
 | Solana program + tests | Done (11 LiteSVM tests passing) |
 | Setup script, backend API, frontend (wallet adapter) | Done; end-to-end smoke test passes on a local validator |
-| Devnet deployment | To do (waiting on devnet SOL) |
-| Vercel | To do |
+| Devnet deployment | Done: programs, mock tokens, registry, demo vault; end-to-end test passes on devnet |
+| Vercel | Deployed; serves the Solana build once `jv` is merged into `main` |
 
 ## Limits and known issues
 

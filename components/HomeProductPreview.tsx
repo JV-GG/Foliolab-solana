@@ -4,8 +4,8 @@ import {useState} from 'react';
 
 const holdings = [
   {symbol: 'USDC', name: 'Cash reserve', value: '$9,944.16', allocation: '40%', color: '#27bfa3'},
-  {symbol: 'AAPLon', name: 'Apple token', value: '$8,701.14', allocation: '35%', color: '#8f6ee8'},
-  {symbol: 'NVDAon', name: 'Nvidia token', value: '$6,215.10', allocation: '25%', color: '#e9ad38'},
+  {symbol: 'AAPLx', name: 'Apple token', value: '$8,701.14', allocation: '35%', color: '#8f6ee8'},
+  {symbol: 'NVDAx', name: 'NVIDIA token', value: '$6,215.10', allocation: '25%', color: '#e9ad38'},
 ] as const;
 
 const ranges = {

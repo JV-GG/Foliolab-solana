@@ -1,6 +1,6 @@
 # Validation, economics and decisions
 
-Current delivery priority: [BNB hackathon prototype](06-bnb-hackathon.md). The production validation sequence below is deferred rather than a prerequisite to the simulated demo.
+Current delivery priority: the Solana hackathon prototype (see [`zhwx.md`](../zhwx.md)). The production validation sequence below is deferred rather than a prerequisite to the simulated demo.
 
 ## Decision log
 
@@ -14,6 +14,7 @@ Current delivery priority: [BNB hackathon prototype](06-bnb-hackathon.md). The p
 | 2026-09-17 | BSC mainnet submission; initial browser simulation | Event requirement / current prototype |
 | 2026-09-18 | Seeded pooled portfolio: founding investor seeds the vault, later investors receive shares, manager rebalances shared holdings | Founder direction; supersedes individual-wallet basket proposal |
 | 2026-09-18 | Aik Wei owns smart contracts; Vincent owns backend; frontend owner remains open | Confirmed team assignment; see [PRD and task plan](../docs/folio-lab-pooled-fund-prd.md) |
+| 2026-10-11 | Moved to a Solana-track hackathon: Anchor program on devnet, USDC settlement, mock xStocks and a mock swap router; ed25519-signed prices | Founder direction |
 
 ## Riskiest assumptions and cheap tests
 

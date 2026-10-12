@@ -2,7 +2,7 @@
  * Live USD prices for the vault's stock tokens, server-side.
  *
  * The devnet tokens are mocks of real xStocks, so each is priced from its `underlying` ticker via
- * the Binance Web3 RWA listing (Ondo's tokenized stock on BSC, judged by `judgeQuote`). With
+ * Binance Web3 market data for that stock (judged by `judgeQuote`). With
  * PRICE_SOURCE=static, fixed demo prices are used instead — for offline demos only, never on
  * mainnet.
  */
@@ -34,11 +34,11 @@ function rules(): PriceRules {
   };
 }
 
-function useStatic(): boolean {
+function staticPricesOn(): boolean {
   return process.env.PRICE_SOURCE === 'static' && CLUSTER !== 'mainnet-beta';
 }
 
-/** One Binance row per underlying ticker, preferring BSC (where the Ondo tokens trade). */
+/** One Binance market-data row per underlying ticker (the most liquid listing, chain id 56, wins). */
 async function rowsByTicker(): Promise<Map<string, RwaToken>> {
   const listing = await getRwaTokens();
   if (!listing.ok) {
@@ -65,7 +65,7 @@ export async function quoteMints(
   const quotes: Quote[] = [];
   const refused: Refusal[] = [];
   if (mints.length === 0) return {quotes, refused};
-  const rows = useStatic() ? undefined : await rowsByTicker();
+  const rows = staticPricesOn() ? undefined : await rowsByTicker();
 
   for (const mint of mints) {
     const token = tokenByMint(mint);

@@ -3,7 +3,7 @@ import {toPlan} from './read';
 
 describe('toPlan', () => {
   it('returns the text with its version', () => {
-    expect(toPlan('60% AAPLon, 40% NVDAon', BigInt(2))).toEqual({version: 2, text: '60% AAPLon, 40% NVDAon'});
+    expect(toPlan('60% AAPLx, 40% NVDAx', BigInt(2))).toEqual({version: 2, text: '60% AAPLx, 40% NVDAx'});
   });
 
   it('treats version 0 as no plan posted', () => {

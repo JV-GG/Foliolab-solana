@@ -5,39 +5,39 @@ import type {VaultView} from '@/lib/contracts/hooks';
 import {AssetMap} from './AssetMap';
 import type {MapHolder} from './useIslandOverlay';
 
-const DEMO_VAULT_ADDRESS = '0x1111111111111111111111111111111111111111' as string;
+const DEMO_VAULT_ADDRESS = 'Demo1111111111111111111111111111111111111111' as string;
 
 const DEMO_VAULT: VaultView = {
   address: DEMO_VAULT_ADDRESS,
   name: 'Visual Demo Vault',
   symbol: 'DEMO',
-  manager: '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' as string,
+  manager: 'DemoA11111111111111111111111111111111111111' as string,
   state: 'ACTIVE',
   index: 0,
   shareDecimals: 6,
-  totalSupply: '100000000000000000000',
+  totalSupply: '100000000',
   holdings: [
     {
-      asset: '0x55d398326f99059fF775485246999027B3197955' as string,
+      asset: 'DKg3JGudRDDWymeLhWVEjhfagNGi93SGYdRb7A8TuHdv' as string,
       symbol: 'USDC',
-      decimals: 18,
-      amount: '40000000000000000000',
+      decimals: 6,
+      amount: '40000000',
       priceUsd: '1',
       valueUsd: '40',
     },
     {
-      asset: '0x390a684ef9cade28a7ad0dfa61ab1eb3842618c4' as string,
-      symbol: 'AAPLon',
-      decimals: 18,
-      amount: '1000000000000000000',
+      asset: 'AtVJpQjnBuhQwHFhdadj7TuNnbK2u4Aonu2wcZgGSBVJ' as string,
+      symbol: 'AAPLx',
+      decimals: 8,
+      amount: '100000000',
       priceUsd: '35',
       valueUsd: '35',
     },
     {
-      asset: '0xa9ee28c80f960b889dfbd1902055218cba016f75' as string,
-      symbol: 'NVDAon',
-      decimals: 18,
-      amount: '1000000000000000000',
+      asset: 'E87tWL7sLcD5GrpcJkewquzri9Na2sJsrV5JcLt8Ce6g' as string,
+      symbol: 'NVDAx',
+      decimals: 8,
+      amount: '100000000',
       priceUsd: '25',
       valueUsd: '25',
     },
@@ -45,34 +45,34 @@ const DEMO_VAULT: VaultView = {
   totalValueUsd: '100',
   sharePriceUsd: '1',
   plan: {version: 1, text: 'Visual demonstration only.'},
-  position: {shares: '50000000000000000000', valueUsd: '50'},
+  position: {shares: '50000000', valueUsd: '50'},
   pricedAt: 0,
 };
 
 const DEMO_HOLDERS: MapHolder[] = [
   {
     id: 'demo-wallet-a',
-    address: '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    address: 'DemoA11111111111111111111111111111111111111',
     label: 'Wallet A',
-    shares: '50000000000000000000',
+    shares: '50000000',
     valueUsd: '50',
     current: true,
     kind: 'wallet',
   },
   {
     id: 'demo-wallet-b',
-    address: '0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+    address: 'DemoB11111111111111111111111111111111111111',
     label: 'Wallet B',
-    shares: '30000000000000000000',
+    shares: '30000000',
     valueUsd: '30',
     current: false,
     kind: 'wallet',
   },
   {
     id: 'demo-wallet-c',
-    address: '0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC',
+    address: 'DemoC11111111111111111111111111111111111111',
     label: 'Wallet C',
-    shares: '20000000000000000000',
+    shares: '20000000',
     valueUsd: '20',
     current: false,
     kind: 'wallet',
@@ -98,8 +98,8 @@ export function CapitalMapDemo() {
 
           <DemoSection title="Asset colors">
             <DemoRow color="#55d7c2" label="USDC" value="40%" />
-            <DemoRow color="#a985ef" label="AAPLon" value="35%" />
-            <DemoRow color="#f1c85b" label="NVDAon" value="25%" />
+            <DemoRow color="#a985ef" label="AAPLx" value="35%" />
+            <DemoRow color="#f1c85b" label="NVDAx" value="25%" />
           </DemoSection>
 
           <DemoSection title="Investor territories">

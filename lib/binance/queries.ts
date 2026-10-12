@@ -1,12 +1,13 @@
 /**
- * Server-side reads against the Binance Web3 API.
+ * Server-side reads against the Binance Web3 API, used only as the reference source of US stock
+ * prices for the price signer (lib/pricing). Nothing here touches a chain.
  *
  * Only ever imported from Server Components and Route Handlers, so the API
  * secret stays out of the client bundle. Every function returns an Outcome:
  * a failed call is surfaced, never replaced with placeholder numbers.
  */
-import {BSC_CHAIN_ID, host, loadCredentials, request} from './client.ts';
-import type {Chain, Outcome, RwaPlatform, RwaToken} from './types.ts';
+import {host, loadCredentials, request} from './client.ts';
+import type {Outcome, RwaToken} from './types.ts';
 
 /**
  * `fetch failed` on its own says nothing. The actionable detail is in
@@ -27,14 +28,14 @@ function describeNetworkError(error: unknown): string {
   };
 
   if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-    return `Request timed out after 15s reaching ${host()}. Run: node api/doctor.ts`;
+    return `Request timed out after 15s reaching ${host()}.`;
   }
 
   return [
     `Could not reach ${host()}`,
     code ? `(${code})` : '',
     code && hint[code] ? `— ${hint[code]}` : '',
-    'Run: node api/doctor.ts',
+    'If DNS is blocked, set BINANCE_WEB3_DNS=1.1.1.1.',
   ]
     .filter(Boolean)
     .join(' ');
@@ -79,77 +80,4 @@ async function read<T>(
 
 export function getRwaTokens(): Promise<Outcome<RwaToken[]>> {
   return read<RwaToken[]>('/api/v1/dex/market/rwa/tokens', {limit: 500});
-}
-
-export function getRwaPlatforms(): Promise<Outcome<RwaPlatform[]>> {
-  return read<RwaPlatform[]>('/api/v1/dex/market/rwa/platforms');
-}
-
-export function getMarketChains(): Promise<Outcome<Chain[]>> {
-  return read<Chain[]>('/api/v1/dex/market/supported/chain');
-}
-
-export function getWalletChains(): Promise<Outcome<Chain[]>> {
-  return read<Chain[]>('/api/v1/dex/balance/supported/chain');
-}
-
-export function getTradingChains(): Promise<Outcome<Chain[]>> {
-  return read<Chain[]>('/api/v1/dex/aggregator/supported/chain');
-}
-
-export function getUnderlyingMarket(tokenContractAddress: string): Promise<Outcome<unknown>> {
-  return read('/api/v1/dex/market/rwa/underlying-market', {
-    binanceChainId: BSC_CHAIN_ID,
-    tokenContractAddress,
-  });
-}
-
-/** One route from `/aggregator/quote`. Only the fields the trade builder relies on. */
-export interface AggregatorQuote {
-  quoteId: string;
-  executionMode: string;
-  fromTokenAmount: string;
-  toTokenAmount: string;
-  approveTarget: string;
-  dexRouterList: {dexProtocol: {dexName: string; percent: string}}[];
-}
-
-/** `/aggregator/swap` response: an unsigned transaction for `userWalletAddress` to send. */
-export interface AggregatorSwap {
-  executionMode: string;
-  tx: {
-    from: string;
-    to: string;
-    data: string;
-    value: string;
-    minReceiveAmount: string;
-    slippagePercent: string;
-    signatureData: unknown;
-  };
-  rfq: unknown;
-}
-
-/**
- * Ondo tokens need `userWalletAddress` even to quote: the market maker prices for that taker,
- * so it must be the address that will actually send the swap (for a vault, the vault itself).
- */
-export function getSwapQuote(params: {
-  fromTokenAddress: string;
-  toTokenAddress: string;
-  amount: string;
-  userWalletAddress: string;
-}): Promise<Outcome<AggregatorQuote[]>> {
-  return read<AggregatorQuote[]>('/api/v1/dex/aggregator/quote', {binanceChainId: BSC_CHAIN_ID, ...params});
-}
-
-/** Builds an unsigned swap. Executes nothing; the returned transaction must still be sent. */
-export function buildSwap(params: {
-  fromTokenAddress: string;
-  toTokenAddress: string;
-  amount: string;
-  userWalletAddress: string;
-  quoteId: string;
-  slippagePercent: string;
-}): Promise<Outcome<AggregatorSwap>> {
-  return read<AggregatorSwap>('/api/v1/dex/aggregator/swap', {binanceChainId: BSC_CHAIN_ID, ...params});
 }

@@ -12,141 +12,124 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## FIRST: ask which part the person is working on
 
-This repo is split into **4 parts**, worked on in parallel by about 5 people. Before writing or changing any
+This repo is split into **4 parts**, worked on in parallel by the team. Before writing or changing any
 code, ask the person:
 
-> Which part are you working on? **1** Smart contracts · **2** Backend API · **3** Investor frontend ·
+> Which part are you working on? **1** Solana program · **2** Backend API · **3** Investor frontend ·
 > **4** Curator frontend and submission
 
 Then stay inside that part's files (see "Who owns what"). Questions about the project in general can be
 answered without asking. If a change needs another part's files or one of the shared interfaces below,
 stop and tell the person to agree it with that part's owner first. Never silently change a shared interface.
 
+Current build status and the task list: [`zhwx.md`](zhwx.md). Read it before starting work.
+
 ## What Folio Lab is
 
-A pooled portfolio of tokenized US stocks on **BNB Smart Chain (BSC) mainnet**. A curator creates a vault
-and manages it; investors deposit USDT and get non-transferable vault shares; the curator invests the
-pooled USDT in approved stock tokens (Ondo's AAPLon, NVDAon, …) through the Binance Web3 trading router.
-Everyone can see what each curator plans to invest in (target weights).
+A pooled portfolio of tokenized US stocks on **Solana**. A curator creates a vault and manages it;
+investors deposit USDC and get non-transferable vault shares; the curator invests the pooled USDC in
+approved stock tokens through an allowlisted swap program. Everyone can see the curator's plan.
 
 Guarantees: the manager can trade but never withdraw; any holder can always withdraw their percentage of
-every holding (even when paused); deposits never dilute existing holders.
+every holding (even when paused); deposits never dilute existing holders; a trade can lose at most 2%
+against signed prices.
 
-**Hackathon:** BNB Chain Tokenized Stocks. **Deadline: 11 October 2026, 12:00 UTC.** Needs a public repo,
-a working deployment or reproducible instructions, and a developer-experience report. Scoring:
-implementation 30%, originality 25%, developer experience 25%, UX 20%. Details:
-`knowledge-base/06-bnb-hackathon.md`.
+**Hackathon:** Solana track. Needs a public repo, a working deployment, a demo video and a
+developer-experience report.
+
+**Demo environment:** Solana **devnet**. Real tokenized stocks (xStocks) and Jupiter liquidity exist only
+on mainnet, so devnet uses mock stock tokens (AAPLx, NVDAx, TSLAx; AAPLx and TSLAx are Token-2022 like
+real xStocks), a mock USDC with a faucet, and `mock_router` in place of Jupiter.
 
 ## The 4 parts
 
-### Part 1 — Smart contracts and deployment
-- `rebalance()`: the curator swaps through the Binance router; balance checks stop anything else leaving
-  the vault (spec §6), and signed prices cap each trade's loss at 2%.
-- `setPlan()`: the curator's investment plan as free text, stored on-chain and versioned. Required
-  before the first trade, never enforced.
-- Deploy script: registry, factory, price signer, guardian, stock allowlist. Deploy to BSC mainnet.
-- Publish ABIs and addresses to `lib/contracts/` for Parts 3 and 4.
+### Part 1 — Solana program and deployment
+- `anchor/programs/folio_vault`: registry, vaults, seed/activate/pause, deposit, redeem, `set_plan`,
+  `rebalance` (CPI into an allowlisted router, vault PDA signs, balance + authority checks, 2% loss cap).
+- `anchor/programs/mock_router`: devnet stand-in for Jupiter.
+- Tests: `cd anchor && cargo test -p folio_vault` (LiteSVM). Deploy: `anchor deploy`; then
+  `npm run setup:solana` and `npm run idl` (copies IDLs into `lib/solana/idl/`).
 
-### Part 2 — Backend API (Next.js API routes in this app)
-- `/api/prices`: reads Binance RWA prices, checks the US market is open, returns a signed `PriceUpdate`.
-- `/api/trade`: gets a Binance quote and swap calldata, returns a `TradeRequest` for rebalancing.
-- `/api/vaults`: vault holdings valued at market prices, for display.
-- Owns the Binance client in `lib/binance/`.
+### Part 2 — Backend API (Next.js route handlers)
+- `/api/prices`: ed25519-signed prices for a vault's holdings. `/api/trade`: the swap route for
+  `rebalance`. `/api/vaults`, `/api/history`: display data. `/api/faucet`, `/api/vaults/<v>/activate`:
+  devnet demo helpers.
+- Price data comes from `lib/binance/` (Binance Web3 market data, server-side only) via
+  `lib/pricing/source.ts`; `PRICE_SOURCE=static` uses fixed demo prices.
 
 ### Part 3 — Investor frontend
-- Wallet connect on BSC (wagmi + viem) and the shared `lib/contracts/` module (ABIs, addresses, hooks).
-- Vault list; vault page with holdings, share price and the curator's plan text.
-- Deposit (approve USDT → fetch `/api/prices` → `deposit`) and withdraw (`redeem`).
-- Replaces the mock data in `lib/domain/` and `lib/state/`.
+- Wallet: `@solana/wallet-adapter-react` (Phantom, Solflare, Backpack via Wallet Standard), wrapped in
+  `lib/contracts/wallet.ts`. Hooks in `lib/contracts/hooks.ts` (vaults, deposit, redeem, balances).
+- Vault list, vault page, portfolio, deposit (Ed25519 price instruction + `deposit` in one transaction),
+  withdraw (`redeem`), "+ Test USDC" faucet.
 
 ### Part 4 — Curator frontend and submission
-- Curator console: create and seed a vault, post a plan (`setPlan`), rebalance (fetch `/api/trade` and
-  `/api/prices` → `rebalance`).
-- Deploy the app to Vercel.
-- Root `README.md` for judges, demo video, developer-experience report.
+- Curator console: create + seed a vault (one transaction), post a plan, rebalance, activate.
+- Vercel deployment, root `README.md`, demo video, developer-experience report.
 
 ## Who owns what
 
 | Path | Part |
 |---|---|
-| `contracts/**`, `docs/folio-lab-contract-architecture.md`, `docs/sc-checklist.md` | 1 |
-| `app/api/**`, `lib/binance/**`, `api/` (endpoint explorer) | 2 |
-| `lib/contracts/**` (ABIs/addresses written by Part 1, hooks by Part 3), wallet setup, `app/page.tsx`, `app/vaults/**`, existing `components/*.tsx`, `lib/domain/**`, `lib/state/**` | 3 |
-| `app/curator/**`, `components/curator/**`, root `README.md`, Vercel/deploy config | 4 |
-| `app/layout.tsx`, `package.json`, `.env.example` | shared — coordinate before editing |
-
-`app/api-visual/` and `components/viz/` are a Binance API data explorer, not product UI.
+| `anchor/**` | 1 |
+| `app/api/**`, `lib/binance/**`, `lib/pricing/**`, `lib/trade/**`, `lib/vaults/**`, `lib/history/server.ts`, `lib/chain/**` | 2 |
+| `lib/contracts/**`, `app/page.tsx`, `app/explore/**`, `app/portfolio/**`, `app/vaults/**`, `components/*.tsx`, `lib/domain/**`, `lib/history/hooks.ts` | 3 |
+| `app/curator/**`, `components/curator/**`, root `README.md`, Vercel config | 4 |
+| `lib/solana/**`, `scripts/**`, `app/layout.tsx`, `app/providers.tsx`, `package.json`, `.env.example` | shared — coordinate before editing |
 
 ## Shared interfaces (change only by agreement, then update this section)
 
-**Contracts (Part 1 → 2, 3, 4).** Existing, built and tested:
-```solidity
-// VaultFactory
-function createVault(string name, string symbol, address manager) returns (address vault);
-// FolioVault
-function seed(uint256 amount) returns (uint256 shares);                       // anyone, DRAFT, min 10 USDT
-function deposit(uint256 amount, PriceUpdate prices, bytes signature, uint256 minShares)
-    returns (uint256 shares);                                                 // anyone, ACTIVE
-function redeem(uint256 shares, address to) returns (address[] assets, uint256[] amounts);   // any state
-function redeemExcept(uint256 shares, address to, address[] forfeit) returns (address[], uint256[]);
-function holdings() view returns (address[] assets, uint256[] amounts);
-function state() view returns (VaultState);   // DRAFT, SEEDED, ACTIVE, PAUSED, CLOSED
+**Program** `folio_vault` (`9PY9RRXQuMtHXDyvWNL5ohFrsSux5SLrJhhdtuBgLUJH`), full account lists in
+`anchor/README.md` and `zhwx.md` §5:
 ```
-Manager functions (built, tested; replaced the planned `setTargetWeights` on 10 Oct):
-```solidity
-struct TradeRequest { address router; address sellToken; address buyToken;
-                      uint256 maxSellAmount; uint256 minBuyAmount; bytes callData; }
-function setPlan(string plan);              // manager only, 1–1000 bytes, any state; free text, never enforced
-function plan() view returns (string);   function planVersion() view returns (uint64);   // 0 = no plan
-function rebalance(TradeRequest t, PriceUpdate prices, bytes signature) returns (uint256 sold, uint256 bought);
-    // manager only, ACTIVE, needs planVersion > 0. Prices: same signed list as deposit, must cover the
-    // non-USDT side(s) of the trade. Reverts TradeLossTooHigh if value bought < 98% of value sold.
-event PlanPosted(uint64 indexed version, string plan);
-event Rebalanced(address indexed sellToken, address indexed buyToken, uint256 sold, uint256 bought, uint64 planVersion);
+create_vault(name ≤32 B, manager)        seed(amount ≥ 10 USDC)          activate / pause / unpause (guardian)
+deposit(amount, min_shares, prices)      redeem(shares, forfeit: Pubkey[])   set_plan(text 1–1000 B)
+rebalance(max_sell, min_buy, route_data, prices)
 ```
-Max 10 held tokens per vault (USDT included). A stock sold down to dust (≤ 1/1,000,000 of a token) leaves the held list; USDT never does.
+- PDAs: registry `["registry"]`; vault `["vault", registry, index u64 LE]`; position
+  `["position", vault, owner]`. Vault token accounts are the vault PDA's associated token accounts.
+- remaining_accounts: `deposit` → `[mint, vault_ata]` per held mint; `redeem` →
+  `[mint, vault_ata, recipient_ata]` per held mint; `rebalance` → `[mint, vault_ata]` per held mint, then
+  the router instruction's accounts (vault marked not signer).
+- Shares and USDC have 6 decimals. Max 10 held assets. USDC never leaves the held list.
 
-**Signed prices (Part 2 → 3).** EIP-712, domain name `Folio Lab`, version `1`, chainId 56,
-verifyingContract = `AssetRegistry`. Type `PriceUpdate(address[] assets,uint256[] prices,uint64 timestamp)`.
-`prices[i]` = USDT base units for **one whole** `assets[i]` token. Max age 60 s. Include every stock the
-vault holds.
+**Signed prices (Part 2 → 1, 3, 4).** Message:
+`"FOLIO_LAB_PRICES_V1" || registry || timestamp i64 LE || count u8 || (mint || price u64 LE)*`,
+signed with ed25519 by `registry.price_signer`. `price` = USDC base units for one whole token. Max age
+60 s. The Ed25519 program instruction must sit **directly before** `deposit` / `rebalance`. Build both
+with `lib/solana/program.ts` (`priceMessage`, `priceSignatureIx`).
 
-**API responses (Part 2 → 3, 4).** Proposed:
-- `GET /api/prices?vault=0x…` → `{ update: { assets, prices, timestamp }, signature }` (numbers as strings)
-- `GET /api/trade?vault=0x…&sell=0x…&buy=0x…&amount=…` → a `TradeRequest` object. Verified 10 Oct: the
-  Binance swap `tx.to` equals the quote's `approveTarget` (so `router` = `tx.to`); Ondo quotes need
-  `userWalletAddress` = **the vault address**; `/swap` needs `quoteId` and `slippagePercent`.
-- `GET /api/vaults/0x…` → `{ holdings: [{ asset, symbol, amount, priceUsd, valueUsd }], totalValueUsd,
-  sharePriceUsd }`
+**API responses** (implemented; shapes in `zhwx.md` §5.4): `GET /api/prices?vault=&include=`,
+`GET /api/trade?vault=&sell=&buy=&amount=`, `GET /api/vaults[?account=]`, `GET /api/vaults/<v>`,
+`GET /api/history`, `POST /api/faucet`, `POST /api/vaults/<v>/activate`.
 
-**Shared dev chain.** Build against `anvil --fork-url $BSC_RPC_URL` (a local copy of BSC mainnet with the
-real tokens and router) until the mainnet deploy, so nobody waits on real funds.
+**Addresses.** `lib/solana/addresses.json`, per cluster (`devnet`, `localnet`), written by
+`npm run setup:solana`. Never hard-code mints or the registry.
 
 ## Key facts and gotchas
 
-- Stack: Next.js 16 + React 19 + Tailwind 4 (read the Next note at the top of this file); Foundry,
-  Solidity 0.8.30, OpenZeppelin 5.7, EVM `cancun`. The PM prefers Vite + TanStack Start later; **stay on
-  Next.js until after the deadline.**
-- Contracts: `cd contracts && forge test` (144 passing); the whole flow as a story:
-  `forge test --match-contract SimulationTest -vv`. Full contract context: `contracts/README.md`.
-- Deposits trust backend-signed prices (no reliable on-chain price exists for these tokens on BSC). The
-  price-signer key is a secret: only in env vars, never committed, never sent to the browser.
-- Binance Web3 API: errors come back as HTTP 200 with `success:false`; some Malaysian ISPs block its DNS
-  (set `BINANCE_WEB3_DNS=1.1.1.1`). See `api/README.md`.
-- Liquidity is the real limit. Fork survey (10 Oct), Binance route vs signed price at 200 / 1,000 USDT:
-  AAPLon, NVDAon, AVGOon, TSMon fill within 1% (the allowlist); GOOGLon only at 200; MSFTon returns ~$0;
-  AMZNon, AMDon, QQQon, SPYon lose 6–96%; METAon and TSLAon cannot quote. `/api/trade` warns when a quote
-  already loses more than the vault's 2% cap.
-- Never commit `.env` files or private keys. Never deploy with a raw private key; use
-  `cast wallet import` keystores.
-- **The developer-experience report must be written by the team in their own words** — the organisers
-  reject AI-written reports. Agents may organise notes or list facts, but must not write the report.
+- Stack: Next.js 16 + React 19 + Tailwind 4 (read the Next note at the top of this file); Anchor 1.2.1,
+  Rust, Solana CLI 4.3, `@anchor-lang/core` 1.2.1, `@solana/web3.js` 1.x, `@solana/spl-token`.
+- **Build programs with `anchor build --arch v0`.** Anchor 1.2 defaults to SBPF v3, which LiteSVM rejects.
+  Homebrew's `solana` lacks `cargo-build-sbf`; get it from the Agave release (see `zhwx.md` §6).
+- Anchor 1.x API: `Context<'info, T>` (one lifetime); `CpiContext::new(program_id, accounts)`.
+- Local chain: `npm run validator`, then `solana -u localhost airdrop 100` and
+  `CLUSTER=localnet npm run setup:solana`. End-to-end check: `npm run smoke:solana`.
+- The public devnet RPC rate-limits (HTTP 429). Use a dedicated devnet RPC (e.g. Helius) for Vercel.
+- Secrets (server-only env vars, never `NEXT_PUBLIC_`, never committed): `PRICE_SIGNER_SECRET_KEY`,
+  `GUARDIAN_SECRET_KEY`, `FAUCET_SECRET_KEY`, `BINANCE_WEB3_API_KEY/SECRET`. Keys live outside the repo
+  (`~/folio-*.json`, `~/.config/solana/id.json`). Never commit `.env*` files or keypairs.
+- The program keypairs in `anchor/target/deploy/` (git-ignored) fix the program IDs; share them
+  privately with whoever deploys.
+- **The developer-experience report must be written by the team in their own words.** Agents may
+  organise notes or list facts, but must not write the report.
 
 ## Docs
 
 | Doc | What |
 |---|---|
-| `contracts/README.md` | Contract handoff: how it works, decisions, backend interface |
-| `docs/folio-lab-contract-architecture.md` | Full contract spec |
+| `zhwx.md` | Build status, task list, interfaces, toolchain |
+| `anchor/README.md` | Program accounts, signed-price format, remaining accounts |
+| `README.md` | Project overview for judges |
 | `docs/folio-lab-pooled-fund-prd.md` | Product requirements |
-| `knowledge-base/` | Market research and hackathon rules |
+| `knowledge-base/` | Market research and decisions |

@@ -1,20 +1,19 @@
 # Tokenized portfolio management — knowledge base
 
-Version 0.3 · Updated 18 September 2026 · Stage: BNB hackathon prototype
+Version 0.4 · Updated 12 October 2026 · Stage: Solana hackathon prototype
 
 ## Start here
 
-**Current priority:** build for the BNB tokenized-stocks hackathon. Read [Hackathon scope](06-bnb-hackathon.md) first; earlier production recommendations remain background context.
+**Current priority:** the Solana-track hackathon build (devnet, Anchor program, Next.js app). Build status and tasks: [`zhwx.md`](../zhwx.md). Earlier production recommendations remain background context.
 
 The founder proposes a DeFi fund-management launchpad where creators curate investment strategies and investors allocate to portfolios according to their risk appetite, initially inspired by tokenized stocks.
 
 **Assessment:** worth validating, but the generic product already has close competitors. The strongest initial direction is a curated marketplace of transparent, constrained investment vaults for a specific eligible customer segment. Distribution, manager quality, and credible exits will matter more than simply enabling vault creation.
 
-Team repository: [noobstar3310/bnb-hack](https://github.com/noobstar3310/bnb-hack). This knowledge base separates sourced research, founder decisions, and proposed implementation work.
+This knowledge base separates sourced research, founder decisions, and proposed implementation work.
 
 | Document | Purpose |
 |---|---|
-| [BNB hackathon](06-bnb-hackathon.md) | Event constraints, prototype status and next integration slices |
 | [Concept and assessment](01-concept-and-assessment.md) | Definition, ETF/unit-trust comparison, value proposition, differentiation |
 | [Market and evidence](02-market-and-evidence.md) | Competitors, asset providers, dated source register and limitations |
 | [Product and mechanics](03-product-and-mechanics.md) | Investor/manager flows, share accounting, proposed MVP |
@@ -27,7 +26,7 @@ Team repository: [noobstar3310/bnb-hack](https://github.com/noobstar3310/bnb-hac
 - **Verified evidence:** explicitly sourced third-party product or regulatory statements, checked on 17 September 2026. Provider claims are not independent audits.
 - **Recommendations:** analyst proposals, not founder-approved decisions.
 - **Hypotheses:** demand, willingness to pay, manager supply, distribution advantage, and economics remain unvalidated.
-- **Selected event:** BNB tokenized-stocks hackathon; BSC mainnet is the submission target.
+- **Selected event:** Solana-track hackathon; Solana devnet with mock tokenized stocks (xStocks-style) is the demo target.
 - **Unknown:** launch jurisdiction, customer eligibility, issuer, custody/legal structure, budget, team roles, and production launch schedule.
 
 ## Maintenance
