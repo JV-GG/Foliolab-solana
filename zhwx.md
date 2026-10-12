@@ -48,8 +48,9 @@ written so you can pick one and do it.
 | Demo vault "Big Tech Core" | `2cRhpsvAaLDE4e18rjrLczM1zBkwFMgZUU9mdNqWk4X9` |
 
 ### Vercel environment variables (Production)
-`NEXT_PUBLIC_SOLANA_CLUSTER=devnet`, `NEXT_PUBLIC_SOLANA_RPC_URL` and `SOLANA_RPC_URL` (a dedicated devnet
-RPC such as Helius; the public one returns HTTP 429 under load), `PRICE_SIGNER_SECRET_KEY`,
+`NEXT_PUBLIC_SOLANA_CLUSTER=devnet`, `NEXT_PUBLIC_SOLANA_RPC_URL` and `SOLANA_RPC_URL` (**set to the team's Helius
+devnet URL**, `https://devnet.helius-rpc.com/?api-key=…`, key "foliolab" in Jun Voon's Helius account; the free
+public devnet RPC returned HTTP 429 and broke the live site), `PRICE_SIGNER_SECRET_KEY`,
 `GUARDIAN_SECRET_KEY`, `FAUCET_SECRET_KEY` (contents of `~/folio-price-signer.json`, `~/folio-guardian.json`,
 `~/folio-faucet.json` on Jun Voon's Mac), `BINANCE_WEB3_API_KEY`, `BINANCE_WEB3_API_SECRET`, and
 `PRICE_SOURCE=binance` (or `static` for fixed demo prices).

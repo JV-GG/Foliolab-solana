@@ -45,7 +45,7 @@ export function useConnection(): {address: string | undefined; isConnected: bool
  */
 export function useSendTransaction() {
   const {connection} = useSolanaConnection();
-  const {publicKey, sendTransaction} = useWallet();
+  const {publicKey, signTransaction, sendTransaction} = useWallet();
 
   return useCallback(
     async (input: TransactionInstruction[] | Transaction, signers: Signer[] = []): Promise<string> => {
@@ -58,10 +58,19 @@ export function useSendTransaction() {
         tx = new Transaction({feePayer: publicKey, blockhash, lastValidBlockHeight}).add(...input);
         if (signers.length) tx.partialSign(...signers);
       }
-      const signature = await sendTransaction(tx, connection, {preflightCommitment: 'confirmed'});
+      let signature: string;
+      if (signTransaction) {
+        // Sign in the wallet, send through our RPC. Phantom's own send edits the transaction (it adds
+        // instructions), which voids a server's partial signature (the faucet), and it reports any
+        // simulation failure only as "Unexpected error". Sending ourselves keeps the real program error.
+        const signed = await signTransaction(tx);
+        signature = await connection.sendRawTransaction(signed.serialize(), {preflightCommitment: 'confirmed'});
+      } else {
+        signature = await sendTransaction(tx, connection, {preflightCommitment: 'confirmed'});
+      }
       await waitForConfirmation(connection, signature, tx.lastValidBlockHeight ?? lastValidBlockHeight);
       return signature;
     },
-    [connection, publicKey, sendTransaction],
+    [connection, publicKey, signTransaction, sendTransaction],
   );
 }

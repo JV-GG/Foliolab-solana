@@ -56,7 +56,9 @@ const PROGRAM_ERRORS = new Map<number, string>(folioIdl.errors.map((e) => [e.cod
 
 /** The program's error name inside a wallet/RPC failure, if there is one. */
 export function programErrorName(error: unknown): string | null {
-  const text = [String((error as {message?: string})?.message ?? ''), ...(((error as {logs?: string[]})?.logs) ?? [])].join('\n');
+  const e = error as {message?: string; logs?: string[]; transactionLogs?: string[]};
+  // web3.js puts a failed send's program logs in `transactionLogs`; Anchor errors in `logs`.
+  const text = [String(e?.message ?? ''), ...(e?.logs ?? []), ...(e?.transactionLogs ?? [])].join('\n');
   const named = /Error Code: (\w+)/.exec(text);
   if (named) return named[1];
   const hex = /custom program error: 0x([0-9a-f]+)/i.exec(text);
