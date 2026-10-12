@@ -106,7 +106,7 @@ export function useSendTransaction() {
       if (!publicKey) throw new Error('Connect a wallet first.');
       const {blockhash, lastValidBlockHeight} = await connection.getLatestBlockhash('confirmed');
 
-      let tx: Transaction | VersionedTransaction | null = null;
+      let tx: Transaction | VersionedTransaction;
       if (input instanceof VersionedTransaction) {
         tx = input;
         if (signers.length) tx.sign(signers);
@@ -114,37 +114,59 @@ export function useSendTransaction() {
         tx = input;
         if (signers.length) tx.partialSign(...signers);
       } else {
-        let compiledV0 = false;
+        const legacyTx = new Transaction({feePayer: publicKey, blockhash, lastValidBlockHeight}).add(...input);
+        if (signers.length) legacyTx.partialSign(...signers);
+
+        let isTooLarge = false;
         try {
-          const d = deployment();
-          if (d.lookupTable) {
-            const altRes = await connection.getAddressLookupTable(new PublicKey(d.lookupTable));
-            if (altRes.value) {
-              const messageV0 = new TransactionMessage({
-                payerKey: publicKey,
-                recentBlockhash: blockhash,
-                instructions: input,
-              }).compileToV0Message([altRes.value]);
-              const txV0 = new VersionedTransaction(messageV0);
-              if (signers.length) txV0.sign(signers);
-              tx = txV0;
-              compiledV0 = true;
-            }
-          }
-        } catch (err) {
-          console.warn('V0 compilation skipped, using legacy transaction:', err);
+          legacyTx.serialize({requireAllSignatures: false, verifySignatures: false});
+        } catch (err: any) {
+          if (/too large/i.test(String(err?.message))) isTooLarge = true;
         }
 
-        if (!compiledV0) {
-          const legacyTx = new Transaction({feePayer: publicKey, blockhash, lastValidBlockHeight}).add(...input);
-          if (signers.length) legacyTx.partialSign(...signers);
+        if (isTooLarge) {
+          const d = deployment();
+          let altAccount = null;
+          if (d.lookupTable) {
+            altAccount = (await connection.getAddressLookupTable(new PublicKey(d.lookupTable))).value;
+          }
+          if (altAccount) {
+            const messageV0 = new TransactionMessage({
+              payerKey: publicKey,
+              recentBlockhash: blockhash,
+              instructions: input,
+            }).compileToV0Message([altAccount]);
+            const vTx = new VersionedTransaction(messageV0);
+            if (signers.length) vTx.sign(signers);
+            tx = vTx;
+          } else {
+            tx = legacyTx;
+          }
+        } else {
           tx = legacyTx;
         }
       }
 
+      // Simulate first on our RPC: surfaces exact program error instead of generic wallet failure
+      const sim = await connection.simulateTransaction(tx as any);
+      if (sim.value.err) {
+        const simLogs = sim.value.logs ?? [];
+        const anchorErr = simLogs.find((l) => l.includes('Error Message:'));
+        if (anchorErr) {
+          throw new Error(anchorErr.replace(/^.*Error Message:\s*/, ''));
+        }
+        const codeErr = simLogs.find((l) => l.includes('Error Code:'));
+        if (codeErr) {
+          throw new Error(codeErr.replace(/^.*Error Code:\s*/, ''));
+        }
+        const failure = new Error(`Simulation failed: ${JSON.stringify(sim.value.err)}`) as Error & {logs?: string[]};
+        failure.logs = simLogs;
+        throw failure;
+      }
+
       let signature: string;
       try {
-        signature = await sendTransaction(tx!, connection, {preflightCommitment: 'confirmed'});
+        signature = await sendTransaction(tx, connection, {preflightCommitment: 'confirmed'});
       } catch (err: any) {
         await extractTxError(err, tx, connection);
       }
