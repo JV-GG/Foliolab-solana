@@ -55,7 +55,7 @@ export function PlanCard({vault, managerAllowed}: Props) {
       </div>
 
       <p className="mt-3 text-[12px] leading-[1.7] text-[#6b746c]">
-        Public, non-custodial and advisory. BNB smart contracts require an on-chain thesis version before the first rebalance.
+        Public, non-custodial and advisory. The Solana program requires an on-chain plan version before the first rebalance.
       </p>
 
       <label className="mt-5 grid gap-2 text-[10px] font-bold uppercase tracking-[0.1em] text-[#59645c]">

@@ -73,7 +73,7 @@ export function AnimatedBrandFooter() {
             <Link href="/portfolio">Portfolio</Link>
             <Link href="/curator">Curator</Link>
           </nav>
-          <p className="text-[13px] leading-6 text-[#667168]">© 2026 Folio Lab · Built on BNB Chain</p>
+          <p className="text-[13px] leading-6 text-[#667168]">© 2026 Folio Lab · Built on Solana</p>
         </div>
       </div>
 

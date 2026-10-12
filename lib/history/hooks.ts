@@ -1,14 +1,13 @@
 'use client';
 
 import {useQuery} from '@tanstack/react-query';
-import type {Address} from 'viem';
 import type {ActivityItem, HistoryResponse} from './types';
 
 export const HISTORY_KEY = 'activity-history';
 
 export function useHistory(options?: {
-  vault?: Address;
-  account?: Address;
+  vault?: string;
+  account?: string;
   enabled?: boolean;
 }) {
   const vault = options?.vault;
@@ -29,7 +28,7 @@ export function useHistory(options?: {
       return data.items;
     },
     enabled,
-    refetchInterval: 3_000,
+    refetchInterval: 10_000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   });

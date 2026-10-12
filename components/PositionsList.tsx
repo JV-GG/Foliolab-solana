@@ -33,7 +33,7 @@ export function PositionsList({vaults, connected, onSelect, onExplore}: Props) {
             <dl className="grid grid-cols-3 gap-5">
               <Metric label="Estimated value" value={vault.position!.valueUsd === null ? 'Unavailable' : money(Number(vault.position!.valueUsd))} />
               <Metric label="Vault share" value={ownership === null ? 'Unavailable' : `${formatPercent(ownership)}%`} />
-              <Metric label="Shares" value={tokenAmount(shares, 18, 6)} />
+              <Metric label="Shares" value={tokenAmount(shares, 6, 6)} />
             </dl>
             <button type="button" onClick={() => onSelect(vault.address)} className="folio-button-secondary">Open position</button>
           </article>

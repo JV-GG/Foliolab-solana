@@ -2,7 +2,7 @@
 
 import {useState} from 'react';
 import {useRouter} from 'next/navigation';
-import {useConnection} from 'wagmi';
+import {useConnection} from '@/lib/contracts/wallet';
 import {AccountBar} from './AccountBar';
 import {ActivityFeed} from './ActivityFeed';
 import {Header} from './Header';

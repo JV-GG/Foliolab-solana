@@ -1,7 +1,6 @@
 'use client';
 
 import {useState, type FormEvent} from 'react';
-import type {Address} from 'viem';
 import {useNotify} from '@/components/Toast';
 import {explainError} from '@/lib/contracts/hooks';
 import type {CuratorAction} from './useCuratorActions';
@@ -10,13 +9,13 @@ interface Props {
   connected: boolean;
   deploymentReady: boolean;
   action: CuratorAction;
-  onCreate: (name: string, symbol: string, seed: string) => Promise<Address>;
-  onCreated: (vault: Address) => void;
+  onCreate: (name: string, symbol: string, seed: string) => Promise<string>;
+  onCreated: (vault: string) => void;
 }
 
 const ACTION_LABEL: Partial<Record<CuratorAction, string>> = {
   creating: 'Creating vault…',
-  approving: 'Approving USDT…',
+  approving: 'Preparing…',
   seeding: 'Sending first deposit…',
 };
 
@@ -33,7 +32,7 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
     const cleanSymbol = symbol.trim().toUpperCase();
     if (cleanName.length < 2) return notify('Give the vault a name of at least two characters.');
     if (!/^[A-Z0-9]{2,8}$/.test(cleanSymbol)) return notify('Use a 2–8 character symbol made from letters and numbers.');
-    if (!/^\d+(\.\d+)?$/.test(seed) || Number(seed) < 10) return notify('The first deposit must be at least 10 USDT.');
+    if (!/^\d+(\.\d+)?$/.test(seed) || Number(seed) < 10) return notify('The first deposit must be at least 10 USDC.');
 
     try {
       const vault = await onCreate(cleanName, cleanSymbol, seed);
@@ -52,11 +51,11 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
   return (
     <section>
       <p className="text-[13px] leading-[1.7] text-[#6b746c]">
-        Your connected wallet becomes the curator. Vault deployment, USDT allowance, and seed deposit require three consecutive transaction signatures.
+        Your connected wallet becomes the curator. Vault creation and the seed deposit go in a single transaction you sign once.
       </p>
       {connected && !deploymentReady && (
         <div className="mt-4 border-l-2 border-[#b18b15] pl-3 text-[12px] leading-[1.6] text-[#6f5c0d]">
-          Vault creation is paused: published Registry, Factory and USDT contracts are pending for this chain.
+          Vault creation is paused: Folio Lab is not set up on this cluster yet.
         </div>
       )}
 
@@ -84,7 +83,7 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
           />
         </label>
         <label className="grid gap-2 text-[10px] font-bold uppercase tracking-[0.1em] text-[#59645c]">
-          First Seed Deposit (USDT)
+          First Seed Deposit (USDC)
           <div className="flex items-center rounded-[14px] border border-[#aeb8ad] bg-[#fcfdf9]/70 pr-4 focus-within:border-[#2b3a30]">
             <input
               value={seed}
@@ -93,10 +92,10 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
               disabled={busy}
               className="min-w-0 flex-1 border-0 bg-transparent px-4 py-3 text-[13px] text-[#2b3a30] outline-none disabled:opacity-55"
             />
-            <span className="text-[11px] font-bold text-[#6b746c]">USDT</span>
+            <span className="text-[11px] font-bold text-[#6b746c]">USDC</span>
           </div>
           <span className="text-[11px] font-normal normal-case tracking-normal text-[#6b746c]">
-            Minimum 10 USDT seed. You receive the initial 100% share of the vault.
+            Minimum 10 USDC seed. You receive the initial 100% share of the vault.
           </span>
         </label>
         <button

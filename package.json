@@ -9,15 +9,23 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "abis": "node scripts/gen-abis.mjs"
+    "setup:solana": "tsx scripts/setup-solana.ts",
+    "idl": "cp anchor/target/idl/*.json anchor/target/types/folio_vault.ts anchor/target/types/mock_router.ts lib/solana/idl/",
+    "validator": "solana-test-validator --reset --quiet --ledger anchor/.anchor/test-ledger --bpf-program 9PY9RRXQuMtHXDyvWNL5ohFrsSux5SLrJhhdtuBgLUJH anchor/target/deploy/folio_vault.so --bpf-program FeE32TVg1Yk4DVe4jS3SELK13dQsbbDUWyY4dYKmQhjm anchor/target/deploy/mock_router.so",
+    "smoke:solana": "tsx scripts/smoke-solana.ts"
   },
   "dependencies": {
+    "@anchor-lang/core": "^1.2.1",
+    "@solana/spl-token": "^0.4.15",
+    "@solana/wallet-adapter-base": "^0.9.28",
+    "@solana/wallet-adapter-react": "^0.15.40",
+    "@solana/wallet-adapter-react-ui": "^0.9.40",
+    "@solana/web3.js": "^1.99.0",
     "@tanstack/react-query": "^5.104.1",
     "next": "16.3.5",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "viem": "^2.57.4",
-    "wagmi": "^3.7.7"
+    "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -27,6 +35,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5",
     "vitest": "^5.0.1"
   },

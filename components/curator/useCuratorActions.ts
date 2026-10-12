@@ -1,20 +1,26 @@
 'use client';
 
 import {useQueryClient} from '@tanstack/react-query';
+import {useConnection as useSolanaConnection} from '@solana/wallet-adapter-react';
+import {ComputeBudgetProgram, PublicKey, SystemProgram} from '@solana/web3.js';
+import {ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID} from '@solana/spl-token';
 import {useCallback, useState} from 'react';
-import {
-  getAddress,
-  parseEventLogs,
-  parseUnits,
-  type Address,
-  type Hex,
-} from 'viem';
-import {useChainId, useConfig, useConnection} from 'wagmi';
-import {readContract, simulateContract, writeContract} from 'wagmi/actions';
-import {erc20Abi, folioVaultAbi, vaultFactoryAbi} from '@/lib/contracts/abis';
-import {deploymentFor} from '@/lib/contracts/addresses';
-import {waitForSuccessfulReceipt} from '@/lib/contracts/hooks';
+import {VAULTS_KEY} from '@/lib/contracts/hooks';
+import {useConnection, useSendTransaction} from '@/lib/contracts/wallet';
 import {HISTORY_KEY} from '@/lib/history/hooks';
+import {
+  BN,
+  ata,
+  folioProgram,
+  heldAccounts,
+  positionPda,
+  priceSignatureIx,
+  registryPda,
+  toPriceArg,
+  tokenProgramsOf,
+  usdToUnits,
+  vaultPda,
+} from '@/lib/solana/program';
 import type {SignedPrices, TradeQuote} from './model';
 
 export type CuratorAction =
@@ -30,318 +36,228 @@ export type CuratorAction =
 export type RebalanceStage = 'idle' | 'simulating' | 'wallet' | 'confirming' | 'confirmed';
 
 export interface RebalanceResult {
-  hash: Hex;
+  /** Transaction signature. */
+  hash: string;
   simulatedSold: bigint;
   simulatedBought: bigint;
 }
 
+const SYSVAR_INSTRUCTIONS = new PublicKey('Sysvar1nstructions1111111111111111111111111');
+const MIN_SEED = BigInt(10_000_000); // 10 USDC
+
 export function useCuratorActions() {
-  const config = useConfig();
-  const chainId = useChainId();
+  const {connection} = useSolanaConnection();
   const {address} = useConnection();
+  const send = useSendTransaction();
   const queryClient = useQueryClient();
   const [action, setAction] = useState<CuratorAction>('idle');
 
-  const refreshVaults = useCallback(
-    () => queryClient.invalidateQueries({queryKey: ['vaults']}),
+  const refresh = useCallback(
+    () =>
+      Promise.all([
+        queryClient.invalidateQueries({queryKey: [VAULTS_KEY]}),
+        queryClient.invalidateQueries({queryKey: [HISTORY_KEY]}),
+      ]),
     [queryClient],
   );
 
-  const requireWallet = useCallback((): Address => {
+  const requireWallet = useCallback((): PublicKey => {
     if (!address) throw new Error('Connect the curator wallet first.');
-    return address;
+    return new PublicKey(address);
   }, [address]);
 
+  const seedIx = useCallback(
+    async (vault: PublicKey, investor: PublicKey, usdc: PublicKey, amount: bigint) =>
+      folioProgram(connection)
+        .methods.seed(new BN(amount.toString()))
+        .accountsPartial({
+          investor,
+          vault,
+          position: positionPda(vault, investor),
+          settlementMint: usdc,
+          investorSettlement: ata(investor, usdc, TOKEN_PROGRAM_ID),
+          vaultSettlement: ata(vault, usdc, TOKEN_PROGRAM_ID),
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .instruction(),
+    [connection],
+  );
+
+  /** Creates the vault and seeds it in one transaction, so a vault is never left empty. */
   const createAndSeed = useCallback(
-    async (name: string, symbol: string, amountText: string): Promise<Address> => {
-      const account = requireWallet();
-      const deployment = deploymentFor(chainId);
-      if (!deployment) throw new Error(`No Folio Lab deployment is configured for chain ${chainId}.`);
+    async (name: string, _symbol: string, amountText: string): Promise<string> => {
+      const curator = requireWallet();
+      const amount = usdToUnits(amountText, 6);
+      if (amount < MIN_SEED) throw new Error('The first deposit must be at least 10 USDC.');
+      if (new TextEncoder().encode(name).length > 32) throw new Error('Vault names can be at most 32 bytes.');
 
       setAction('creating');
       try {
-        await simulateContract(config, {
-          address: deployment.factory,
-          abi: vaultFactoryAbi,
-          functionName: 'createVault',
-          args: [name, symbol, account],
-          account,
-        });
-        const createHash = await writeContract(config, {
-          address: deployment.factory,
-          abi: vaultFactoryAbi,
-          functionName: 'createVault',
-          args: [name, symbol, account],
-        });
-        const createReceipt = await waitForSuccessfulReceipt(config, createHash);
-        const created = parseEventLogs({
-          abi: vaultFactoryAbi,
-          eventName: 'VaultCreated',
-          logs: createReceipt.logs,
-        }).find((event) => getAddress(event.args.manager) === getAddress(account));
-        if (!created) throw new Error('Vault was created, but its address was not found in the receipt.');
-        const vault = getAddress(created.args.vault);
-        // Creation is already final even if approval or seeding later fails, so expose the DRAFT
-        // vault immediately and let the curator recover instead of hiding it until the next poll.
-        await refreshVaults();
-
-        const decimals = await readContract(config, {
-          address: deployment.usdt,
-          abi: erc20Abi,
-          functionName: 'decimals',
-        });
-        const amount = parseUnits(amountText, decimals);
-        const minimum = await readContract(config, {
-          address: vault,
-          abi: folioVaultAbi,
-          functionName: 'minSeed',
-        });
-        if (amount < minimum) throw new Error('The first deposit must be at least 10 USDT.');
-
-        const allowance = await readContract(config, {
-          address: deployment.usdt,
-          abi: erc20Abi,
-          functionName: 'allowance',
-          args: [account, vault],
-        });
-        if (allowance < amount) {
-          setAction('approving');
-          const approveHash = await writeContract(config, {
-            address: deployment.usdt,
-            abi: erc20Abi,
-            functionName: 'approve',
-            args: [vault, amount],
-          });
-          await waitForSuccessfulReceipt(config, approveHash);
-        }
-
+        const program = folioProgram(connection);
+        const registry = registryPda();
+        const r = await program.account.registry.fetch(registry);
+        const vault = vaultPda(r.vaultCount, registry);
+        const usdc = r.settlementMint;
+        const create = await program.methods
+          .createVault(name, curator)
+          .accountsPartial({
+            payer: curator,
+            registry,
+            vault,
+            settlementMint: usdc,
+            vaultSettlement: ata(vault, usdc, TOKEN_PROGRAM_ID),
+            tokenProgram: TOKEN_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+          })
+          .instruction();
         setAction('seeding');
-        await simulateContract(config, {
-          address: vault,
-          abi: folioVaultAbi,
-          functionName: 'seed',
-          args: [amount],
-          account,
-        });
-        const seedHash = await writeContract(config, {
-          address: vault,
-          abi: folioVaultAbi,
-          functionName: 'seed',
-          args: [amount],
-        });
-        await waitForSuccessfulReceipt(config, seedHash);
-        await Promise.all([
-          refreshVaults(),
-          queryClient.invalidateQueries({queryKey: [HISTORY_KEY]}),
-        ]);
-        return vault;
+        await send([create, await seedIx(vault, curator, usdc, amount)]);
+        await refresh();
+        return vault.toBase58();
       } finally {
         setAction('idle');
       }
     },
-    [chainId, config, queryClient, refreshVaults, requireWallet],
+    [connection, refresh, requireWallet, seedIx, send],
+  );
+
+  const seedExistingVault = useCallback(
+    async (vaultAddress: string, amountText: string = '10'): Promise<void> => {
+      const curator = requireWallet();
+      const vault = new PublicKey(vaultAddress);
+      setAction('seeding');
+      try {
+        const v = await folioProgram(connection).account.vault.fetch(vault);
+        await send([await seedIx(vault, curator, v.settlementMint, usdToUnits(amountText, 6))]);
+        await refresh();
+      } finally {
+        setAction('idle');
+      }
+    },
+    [connection, refresh, requireWallet, seedIx, send],
   );
 
   const publishPlan = useCallback(
-    async (vault: Address, text: string): Promise<Hex> => {
-      const account = requireWallet();
+    async (vaultAddress: string, text: string): Promise<string> => {
+      const manager = requireWallet();
       setAction('publishing');
       try {
-        await simulateContract(config, {
-          address: vault,
-          abi: folioVaultAbi,
-          functionName: 'setPlan',
-          args: [text],
-          account,
-        });
-        const hash = await writeContract(config, {
-          address: vault,
-          abi: folioVaultAbi,
-          functionName: 'setPlan',
-          args: [text],
-          account,
-        });
-        await waitForSuccessfulReceipt(config, hash);
-        await Promise.all([
-          refreshVaults(),
-          queryClient.invalidateQueries({queryKey: [HISTORY_KEY]}),
-        ]);
-        return hash;
+        const ix = await folioProgram(connection)
+          .methods.setPlan(text)
+          .accountsPartial({manager, vault: new PublicKey(vaultAddress)})
+          .instruction();
+        const signature = await send([ix]);
+        await refresh();
+        return signature;
       } finally {
         setAction('idle');
       }
     },
-    [config, queryClient, refreshVaults, requireWallet],
+    [connection, refresh, requireWallet, send],
   );
 
   const executeRebalance = useCallback(
     async (
-      vault: Address,
+      vaultAddress: string,
       quote: TradeQuote,
       signedPrices: SignedPrices,
       onStage?: (stage: RebalanceStage) => void,
     ): Promise<RebalanceResult> => {
-      const account = requireWallet();
-      const trade = {
-        router: getAddress(quote.trade.router),
-        sellToken: getAddress(quote.trade.sellToken),
-        buyToken: getAddress(quote.trade.buyToken),
-        maxSellAmount: BigInt(quote.trade.maxSellAmount),
-        minBuyAmount: BigInt(quote.trade.minBuyAmount),
-        callData: quote.trade.callData,
-      };
-      const prices = {
-        assets: signedPrices.update.assets.map((asset) => getAddress(asset)),
-        prices: signedPrices.update.prices.map((price) => BigInt(price)),
-        timestamp: BigInt(signedPrices.update.timestamp),
-      };
-      const gas = BigInt(quote.gasLimit);
-      if (gas <= BigInt(0)) throw new Error('The quote service returned an invalid gas limit.');
+      const manager = requireWallet();
+      const vault = new PublicKey(vaultAddress);
+      const sell = new PublicKey(quote.trade.sellMint);
+      const buy = new PublicKey(quote.trade.buyMint);
 
       setAction('simulating');
       onStage?.('simulating');
       try {
-        const simulation = await simulateContract(config, {
-          address: vault,
-          abi: folioVaultAbi,
-          functionName: 'rebalance',
-          args: [trade, prices, signedPrices.signature],
-          account,
-          gas,
-        });
+        const program = folioProgram(connection);
+        const v = await program.account.vault.fetch(vault);
+        const programs = await tokenProgramsOf(connection, [...v.held, buy]);
+        const [sellProgram, buyProgram] = [programs.get(sell.toBase58())!, programs.get(buy.toBase58())!];
+        const ix = await program.methods
+          .rebalance(
+            new BN(quote.trade.maxSell),
+            new BN(quote.trade.minBuy),
+            Buffer.from(quote.trade.routeData, 'base64'),
+            toPriceArg(signedPrices.update),
+          )
+          .accountsPartial({
+            manager,
+            registry: registryPda(),
+            vault,
+            sellMint: sell,
+            buyMint: buy,
+            vaultSell: ata(vault, sell, sellProgram),
+            vaultBuy: ata(vault, buy, buyProgram),
+            router: new PublicKey(quote.trade.router),
+            sellTokenProgram: sellProgram,
+            buyTokenProgram: buyProgram,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            instructions: SYSVAR_INSTRUCTIONS,
+          })
+          .remainingAccounts([
+            ...heldAccounts(vault, v.held, programs),
+            ...quote.trade.routeAccounts.map((a) => ({...a, pubkey: new PublicKey(a.pubkey)})),
+          ])
+          .instruction();
 
         setAction('rebalancing');
         onStage?.('wallet');
-        const hash = await writeContract(config, {
-          address: vault,
-          abi: folioVaultAbi,
-          functionName: 'rebalance',
-          args: [trade, prices, signedPrices.signature],
-          account,
-          gas,
-        });
-        onStage?.('confirming');
-        await waitForSuccessfulReceipt(config, hash);
-        onStage?.('confirmed');
-        await Promise.all([
-          refreshVaults(),
-          queryClient.invalidateQueries({queryKey: [HISTORY_KEY]}),
+        // The Ed25519 instruction must come directly before `rebalance`.
+        const signature = await send([
+          ComputeBudgetProgram.setComputeUnitLimit({units: quote.computeUnits}),
+          priceSignatureIx(signedPrices),
+          ix,
         ]);
+        onStage?.('confirmed');
+        await refresh();
         return {
-          hash,
-          simulatedSold: simulation.result[0],
-          simulatedBought: simulation.result[1],
+          hash: signature,
+          simulatedSold: BigInt(quote.trade.maxSell),
+          simulatedBought: BigInt(quote.quote.expectedBuyAmount),
         };
       } finally {
         setAction('idle');
       }
     },
-    [config, queryClient, refreshVaults, requireWallet],
+    [connection, refresh, requireWallet, send],
   );
 
-  const seedExistingVault = useCallback(
-    async (vault: Address, amountText: string = '10'): Promise<void> => {
-      const account = requireWallet();
-      const deployment = deploymentFor(chainId);
-      if (!deployment) throw new Error(`No deployment configured for chain ${chainId}`);
-
-      const decimals = await readContract(config, {
-        address: deployment.usdt,
-        abi: erc20Abi,
-        functionName: 'decimals',
-      });
-      const amount = parseUnits(amountText, decimals);
-
-      const allowance = await readContract(config, {
-        address: deployment.usdt,
-        abi: erc20Abi,
-        functionName: 'allowance',
-        args: [account, vault],
-      });
-      if (allowance < amount) {
-        setAction('approving');
-        try {
-          const approveHash = await writeContract(config, {
-            address: deployment.usdt,
-            abi: erc20Abi,
-            functionName: 'approve',
-            args: [vault, amount],
-          });
-          await waitForSuccessfulReceipt(config, approveHash);
-        } finally {
-          setAction('idle');
-        }
-      }
-
-      setAction('seeding');
-      try {
-        await simulateContract(config, {
-          address: vault,
-          abi: folioVaultAbi,
-          functionName: 'seed',
-          args: [amount],
-          account,
-        });
-        const seedHash = await writeContract(config, {
-          address: vault,
-          abi: folioVaultAbi,
-          functionName: 'seed',
-          args: [amount],
-        });
-        await waitForSuccessfulReceipt(config, seedHash);
-        await Promise.all([
-          refreshVaults(),
-          queryClient.invalidateQueries({queryKey: [HISTORY_KEY]}),
-        ]);
-      } finally {
-        setAction('idle');
-      }
-    },
-    [chainId, config, queryClient, refreshVaults, requireWallet],
-  );
-
+  /**
+   * Activation is the guardian's job. When the connected wallet is the guardian it signs directly;
+   * otherwise the devnet demo server activates with its guardian key.
+   */
   const activateVault = useCallback(
-    async (vault: Address): Promise<void> => {
-      const account = requireWallet();
+    async (vaultAddress: string): Promise<void> => {
+      const wallet = requireWallet();
       setAction('activating');
       try {
-        let activated = false;
-        try {
-          await simulateContract(config, {
-            address: vault,
-            abi: folioVaultAbi,
-            functionName: 'activate',
-            account,
-          });
-          const hash = await writeContract(config, {
-            address: vault,
-            abi: folioVaultAbi,
-            functionName: 'activate',
-          });
-          await waitForSuccessfulReceipt(config, hash);
-          activated = true;
-        } catch (directError) {
-          // If caller is not guardian (or on local dev), try dev guardian activation
-          const res = await fetch(`/api/vaults/${vault}/activate`, {method: 'POST'});
-          if (res.ok) {
-            activated = true;
-          } else {
-            const errData = await res.json().catch(() => null);
-            throw new Error(errData?.error || (directError instanceof Error ? directError.message : 'Activation failed'));
+        const program = folioProgram(connection);
+        const registry = registryPda();
+        const r = await program.account.registry.fetch(registry);
+        if (r.guardian.equals(wallet)) {
+          const ix = await program.methods
+            .activate()
+            .accountsPartial({guardian: wallet, registry, vault: new PublicKey(vaultAddress)})
+            .instruction();
+          await send([ix]);
+        } else {
+          const res = await fetch(`/api/vaults/${vaultAddress}/activate`, {method: 'POST'});
+          if (!res.ok) {
+            const body = await res.json().catch(() => null);
+            throw new Error(body?.error || 'Activation failed');
           }
         }
-
-        if (activated) {
-          await Promise.all([
-            refreshVaults(),
-            queryClient.invalidateQueries({queryKey: [HISTORY_KEY]}),
-          ]);
-        }
+        await refresh();
       } finally {
         setAction('idle');
       }
     },
-    [config, queryClient, refreshVaults, requireWallet],
+    [connection, refresh, requireWallet, send],
   );
 
   return {action, createAndSeed, seedExistingVault, activateVault, publishPlan, executeRebalance};

@@ -1,0 +1,196 @@
+/**
+ * Shared Solana client for Folio Lab: program handles, PDAs, token accounts and the signed-price
+ * instruction. Used by the setup script, the API routes and the browser, so it must not read any
+ * secret. Program layout and rules: anchor/README.md.
+ */
+import {AnchorProvider, BN, Program, type Wallet} from '@anchor-lang/core';
+import {
+  Connection,
+  Ed25519Program,
+  PublicKey,
+  type AccountMeta,
+  type TransactionInstruction,
+} from '@solana/web3.js';
+import {getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID} from '@solana/spl-token';
+import folioIdl from './idl/folio_vault.json';
+import routerIdl from './idl/mock_router.json';
+import type {FolioVault} from './idl/folio_vault';
+import type {MockRouter} from './idl/mock_router';
+
+export {BN};
+export type {FolioVault, MockRouter};
+
+export const FOLIO_PROGRAM_ID = new PublicKey(folioIdl.address);
+export const ROUTER_PROGRAM_ID = new PublicKey(routerIdl.address);
+export const PRICE_DOMAIN = new TextEncoder().encode('FOLIO_LAB_PRICES_V1');
+export const MAX_PRICE_AGE_S = 60;
+export const VAULT_STATES = ['Draft', 'Seeded', 'Active', 'Paused', 'Closed'] as const;
+export type VaultStateName = (typeof VAULT_STATES)[number];
+
+/** A wallet that cannot sign, for read-only program access (server reads, unconnected browser). */
+const readOnlyWallet: Wallet = {
+  publicKey: PublicKey.default,
+  signTransaction: async () => {
+    throw new Error('read-only');
+  },
+  signAllTransactions: async () => {
+    throw new Error('read-only');
+  },
+} as unknown as Wallet;
+
+export function folioProgram(connection: Connection, wallet: Wallet = readOnlyWallet): Program<FolioVault> {
+  const provider = new AnchorProvider(connection, wallet, {commitment: 'confirmed'});
+  return new Program<FolioVault>(folioIdl as FolioVault, provider);
+}
+
+export function routerProgram(connection: Connection, wallet: Wallet = readOnlyWallet): Program<MockRouter> {
+  const provider = new AnchorProvider(connection, wallet, {commitment: 'confirmed'});
+  return new Program<MockRouter>(routerIdl as MockRouter, provider);
+}
+
+// ---- PDAs
+
+export function registryPda(): PublicKey {
+  return PublicKey.findProgramAddressSync([Buffer.from('registry')], FOLIO_PROGRAM_ID)[0];
+}
+
+export function vaultPda(index: number | bigint | BN, registry = registryPda()): PublicKey {
+  const bytes = Buffer.alloc(8);
+  bytes.writeBigUInt64LE(BigInt(index.toString()));
+  return PublicKey.findProgramAddressSync([Buffer.from('vault'), registry.toBuffer(), bytes], FOLIO_PROGRAM_ID)[0];
+}
+
+export function positionPda(vault: PublicKey, owner: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('position'), vault.toBuffer(), owner.toBuffer()],
+    FOLIO_PROGRAM_ID,
+  )[0];
+}
+
+export function poolPda(): PublicKey {
+  return PublicKey.findProgramAddressSync([Buffer.from('pool')], ROUTER_PROGRAM_ID)[0];
+}
+
+// ---- token accounts
+
+/** The token program that owns `mint` (legacy SPL Token or Token-2022). */
+export async function tokenProgramOf(connection: Connection, mint: PublicKey): Promise<PublicKey> {
+  const info = await connection.getAccountInfo(mint);
+  if (!info) throw new Error(`Mint ${mint.toBase58()} not found`);
+  if (info.owner.equals(TOKEN_PROGRAM_ID) || info.owner.equals(TOKEN_2022_PROGRAM_ID)) return info.owner;
+  throw new Error(`${mint.toBase58()} is not a token mint`);
+}
+
+export async function tokenProgramsOf(connection: Connection, mints: PublicKey[]): Promise<Map<string, PublicKey>> {
+  const infos = await connection.getMultipleAccountsInfo(mints);
+  const out = new Map<string, PublicKey>();
+  infos.forEach((info, i) => {
+    if (!info) throw new Error(`Mint ${mints[i].toBase58()} not found`);
+    out.set(mints[i].toBase58(), info.owner);
+  });
+  return out;
+}
+
+/** Associated token account of `owner` (a PDA is fine) for `mint` under `tokenProgram`. */
+export function ata(owner: PublicKey, mint: PublicKey, tokenProgram: PublicKey): PublicKey {
+  return getAssociatedTokenAddressSync(mint, owner, true, tokenProgram);
+}
+
+/**
+ * remaining_accounts the program expects for each held mint, in `vault.held` order:
+ * `[mint, vault_ata]`, plus `recipient_ata` when `recipient` is given (for `redeem`).
+ */
+export function heldAccounts(
+  vault: PublicKey,
+  held: PublicKey[],
+  programs: Map<string, PublicKey>,
+  recipient?: PublicKey,
+): AccountMeta[] {
+  return held.flatMap((mint) => {
+    const program = programs.get(mint.toBase58());
+    if (!program) throw new Error(`No token program for ${mint.toBase58()}`);
+    const metas: AccountMeta[] = [
+      {pubkey: mint, isSigner: false, isWritable: false},
+      {pubkey: ata(vault, mint, program), isSigner: false, isWritable: true},
+    ];
+    if (recipient) metas.push({pubkey: ata(recipient, mint, program), isSigner: false, isWritable: true});
+    return metas;
+  });
+}
+
+// ---- signed prices
+
+/** What the program's `PriceUpdate` argument looks like on the client. */
+export interface PriceUpdateArg {
+  mints: PublicKey[];
+  prices: BN[];
+  timestamp: BN;
+}
+
+/** JSON form returned by /api/prices (numbers as strings, bytes as base64). */
+export interface SignedPricesJson {
+  update: {mints: string[]; prices: string[]; timestamp: string};
+  message: string;
+  signature: string;
+  signer: string;
+  expiresAt: number;
+}
+
+/**
+ * The exact bytes the price signer signs:
+ * domain || registry || timestamp (i64 LE) || count (u8) || (mint || price u64 LE)*
+ */
+export function priceMessage(
+  registry: PublicKey,
+  update: {mints: (PublicKey | string)[]; prices: (bigint | string | BN)[]; timestamp: bigint | string | BN},
+): Uint8Array {
+  if (update.mints.length !== update.prices.length) throw new Error('mints and prices differ in length');
+  if (update.mints.length > 255) throw new Error('too many prices');
+  const out = Buffer.alloc(PRICE_DOMAIN.length + 32 + 8 + 1 + update.mints.length * 40);
+  let o = 0;
+  out.set(PRICE_DOMAIN, o);
+  o += PRICE_DOMAIN.length;
+  out.set(registry.toBuffer(), o);
+  o += 32;
+  out.writeBigInt64LE(BigInt(update.timestamp.toString()), o);
+  o += 8;
+  out.writeUInt8(update.mints.length, o);
+  o += 1;
+  update.mints.forEach((mint, i) => {
+    out.set(new PublicKey(mint).toBuffer(), o);
+    o += 32;
+    out.writeBigUInt64LE(BigInt(update.prices[i].toString()), o);
+    o += 8;
+  });
+  return out;
+}
+
+export function toPriceArg(json: SignedPricesJson['update']): PriceUpdateArg {
+  return {
+    mints: json.mints.map((m) => new PublicKey(m)),
+    prices: json.prices.map((p) => new BN(p)),
+    timestamp: new BN(json.timestamp),
+  };
+}
+
+/** The Ed25519 verify instruction that must sit directly before `deposit` / `rebalance`. */
+export function priceSignatureIx(signed: SignedPricesJson): TransactionInstruction {
+  return Ed25519Program.createInstructionWithPublicKey({
+    publicKey: new PublicKey(signed.signer).toBytes(),
+    message: Buffer.from(signed.message, 'base64'),
+    signature: Buffer.from(signed.signature, 'base64'),
+  });
+}
+
+/** `usd` like "231.45" → USDC base units (6 decimals), truncating extra digits. */
+export function usdToUnits(usd: string | number, decimals = 6): bigint {
+  const s = typeof usd === 'number' ? usd.toFixed(decimals) : usd.trim();
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(s);
+  if (!m) throw new Error(`Not a plain decimal: "${usd}"`);
+  return BigInt(m[1] + (m[2] ?? '').slice(0, decimals).padEnd(decimals, '0'));
+}
+
+export function vaultStateName(state: Record<string, unknown>): VaultStateName {
+  const key = Object.keys(state)[0] ?? 'draft';
+  return (key.charAt(0).toUpperCase() + key.slice(1)) as VaultStateName;
+}

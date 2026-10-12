@@ -2,7 +2,7 @@
 
 import {useState} from 'react';
 import Link from 'next/link';
-import {useConnection} from 'wagmi';
+import {useConnection} from '@/lib/contracts/wallet';
 import {Header} from './Header';
 import {AnimatedBrandFooter} from './AnimatedBrandFooter';
 import {DetailPanel, type TradeType} from './DetailPanel';

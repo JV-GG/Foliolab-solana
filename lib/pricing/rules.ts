@@ -2,7 +2,7 @@
  * Pure rules for turning Binance quotes into contract prices. No network, no keys.
  *
  * The contract wants `prices[i]` = settlement-token base units for ONE WHOLE `assets[i]` token
- * (spec §5). Binance quotes are USD decimal strings; USDT is treated as exactly $1.
+ * (spec §5). Binance quotes are USD decimal strings; USDC is treated as exactly $1.
  */
 import type {RwaToken} from '@/lib/binance/types';
 

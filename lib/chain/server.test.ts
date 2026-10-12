@@ -4,16 +4,16 @@ import {ApiError, CHAIN_DOWN, errorResponse} from './server';
 
 // Nothing listens on port 1, so every RPC call fails to connect.
 const DEAD_RPC = 'http://127.0.0.1:1';
-const VAULT = '0x0B306BF915C4d645ff596e518fAf3F9669b97016';
+const VAULT = '2cRhpsvAaLDE4e18rjrLczM1zBkwFMgZUU9mdNqWk4X9';
 
 describe('when the chain node is down', () => {
   let saved: string | undefined;
   beforeEach(() => {
-    saved = process.env.CHAIN_RPC_URL;
-    process.env.CHAIN_RPC_URL = DEAD_RPC;
+    saved = process.env.SOLANA_RPC_URL;
+    process.env.SOLANA_RPC_URL = DEAD_RPC;
   });
   afterEach(() => {
-    process.env.CHAIN_RPC_URL = saved;
+    process.env.SOLANA_RPC_URL = saved;
   });
 
   it('says the node is unreachable, not that the vault does not exist', async () => {

@@ -1,7 +1,7 @@
 'use client';
 
 import {useEffect, useMemo, useState} from 'react';
-import {formatUnits, parseUnits, type Address} from 'viem';
+import {formatUnits, parseUnits} from '@/lib/domain/format';
 import {useNotify} from '@/components/Toast';
 import {explainError, type VaultView} from '@/lib/contracts/hooks';
 import {tokenAmount} from '@/lib/domain/format';
@@ -23,8 +23,8 @@ export function RebalanceCard({vault, managerAllowed}: Props) {
   const assets = useMemo(() => curatorAssets(vault), [vault]);
   const sellable = vault.holdings.filter((holding) => holding.amount !== '0');
   const tokenSymbol = useTokenSymbols(assets);
-  const [sell, setSell] = useState<Address | ''>(sellable[0]?.asset ?? '');
-  const [buy, setBuy] = useState<Address | ''>(assets.find((asset) => asset.address !== sell)?.address ?? '');
+  const [sell, setSell] = useState<string | ''>(sellable[0]?.asset ?? '');
+  const [buy, setBuy] = useState<string | ''>(assets.find((asset) => asset.address !== sell)?.address ?? '');
   const [amount, setAmount] = useState('');
   const [slippage, setSlippage] = useState('1');
   const [quote, setQuote] = useState<TradeQuote | null>(null);
@@ -75,7 +75,7 @@ export function RebalanceCard({vault, managerAllowed}: Props) {
     setTransactionHash(null);
   }
 
-  function changeSell(value: Address) {
+  function changeSell(value: string) {
     setSell(value);
     if (buy === value) setBuy(assets.find((asset) => asset.address !== value)?.address ?? '');
     clearPreparedTrade();
@@ -170,9 +170,9 @@ export function RebalanceCard({vault, managerAllowed}: Props) {
   }
 
   const warnings = quote?.warnings ?? [];
-  const priceIncludes = Array.from(new Set([sell, buy].filter((asset): asset is Address => Boolean(asset))));
+  const priceIncludes = Array.from(new Set([sell, buy].filter((asset): asset is string => Boolean(asset))));
   const expected = quote && buyAsset ? formatUnits(BigInt(quote.quote.expectedBuyAmount), buyAsset.decimals) : null;
-  const minimum = quote && buyAsset ? formatUnits(BigInt(quote.trade.minBuyAmount), buyAsset.decimals) : null;
+  const minimum = quote && buyAsset ? formatUnits(BigInt(quote.trade.minBuy), buyAsset.decimals) : null;
   const quoteStatus = !canQuote ? 'Blocked' : quoting ? 'Loading' : quoteError ? 'Error' : quoteExpired ? 'Expired' : quote ? 'Ready' : 'Not started';
   const priceStatus = !canQuote ? 'Blocked' : signingPrices ? 'Loading' : priceError ? 'Error' : pricesExpired ? 'Expired' : signedPrices ? 'Ready' : 'Not started';
   const prepared = Boolean(quote && signedPrices);
@@ -203,7 +203,7 @@ export function RebalanceCard({vault, managerAllowed}: Props) {
           <Field label="Sell">
             <select
               value={sell}
-              onChange={(event) => changeSell(event.target.value as Address)}
+              onChange={(event) => changeSell(event.target.value as string)}
               disabled={!canQuote || quoting || executing}
               className={inputClass}
             >
@@ -218,7 +218,7 @@ export function RebalanceCard({vault, managerAllowed}: Props) {
             <select
               value={buy}
               onChange={(event) => {
-                setBuy(event.target.value as Address);
+                setBuy(event.target.value as string);
                 clearPreparedTrade();
               }}
               disabled={!canQuote || quoting || executing}
@@ -294,7 +294,7 @@ export function RebalanceCard({vault, managerAllowed}: Props) {
           <ol className="grid gap-2 text-[10px]">
             <Stage label="1. Binance quote" status={quoteStatus} />
             <Stage label={`2. Signed prices · include=${priceIncludes.join(',') || 'trade assets'}`} status={priceStatus} />
-            <Stage label={quote ? `3. Simulation · ${Number(quote.gasLimit).toLocaleString('en-US')} gas` : '3. Contract simulation'} status={executionStage === 'simulating' ? 'Running' : executionStage === 'wallet' || executionStage === 'confirming' || executionStage === 'confirmed' ? 'Ready' : executionError ? 'Error' : 'Not started'} />
+            <Stage label={quote ? `3. Simulation · ${quote.computeUnits.toLocaleString('en-US')} CU` : '3. Contract simulation'} status={executionStage === 'simulating' ? 'Running' : executionStage === 'wallet' || executionStage === 'confirming' || executionStage === 'confirmed' ? 'Ready' : executionError ? 'Error' : 'Not started'} />
             <Stage label="4. Manager wallet confirmation" status={executionStage === 'wallet' ? 'Waiting' : executionStage === 'confirming' || executionStage === 'confirmed' ? 'Ready' : executionError ? 'Error' : 'Not started'} />
             <Stage label="5. On-chain result" status={executionStage === 'confirming' ? 'Confirming' : executionStage === 'confirmed' ? 'Confirmed' : executionError ? 'Error' : 'Not started'} />
           </ol>
@@ -318,7 +318,7 @@ export function RebalanceCard({vault, managerAllowed}: Props) {
                 <QuoteValue label="Expected output" value={`${expected ?? 'Unavailable'} ${buySymbol}`} />
                 <QuoteValue label="Minimum received" value={`${minimum ?? 'Unavailable'} ${buySymbol}`} />
                 <QuoteValue label="Route loss" value={quote.quote.lossPercent === null ? 'Not available' : `${quote.quote.lossPercent.toFixed(2)}%`} />
-                <QuoteValue label="Backend gas limit" value={Number(quote.gasLimit).toLocaleString('en-US')} />
+                <QuoteValue label="Compute units" value={quote.computeUnits.toLocaleString('en-US')} />
                 <QuoteValue label="Slippage" value={`${quote.quote.slippagePercent}%`} />
                 <QuoteValue label="Price expiry" value={new Date(signedPrices.expiresAt * 1000).toLocaleTimeString()} />
               </div>

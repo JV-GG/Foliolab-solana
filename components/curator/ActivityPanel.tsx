@@ -1,6 +1,7 @@
 'use client';
 
-import type {Address} from 'viem';
+import {explorerUrl} from '@/lib/contracts/wallet';
+
 import {useHistory} from '@/lib/history/hooks';
 import {shortAddress} from '@/lib/domain/format';
 
@@ -9,7 +10,7 @@ export function ActivityPanel({
   vaultAddress,
 }: {
   vaultName?: string;
-  vaultAddress?: Address;
+  vaultAddress?: string;
 }) {
   const {data: items = []} = useHistory({vault: vaultAddress, enabled: Boolean(vaultAddress)});
   const trades = items.filter((i) => i.type === 'rebalance');
@@ -46,7 +47,7 @@ export function ActivityPanel({
                 <span className="text-[9px] text-[#7b847c]">Plan v{t.planVersion}</span>
               </div>
               <a
-                href={`https://bscscan.com/tx/${t.txHash}`}
+                href={explorerUrl('tx', t.txHash)}
                 target="_blank"
                 rel="noreferrer"
                 className="text-[9px] text-[#59645c] hover:underline"
@@ -67,7 +68,7 @@ export function ActivityStrip({
   onOpen,
 }: {
   vaultName: string;
-  vaultAddress?: Address;
+  vaultAddress?: string;
   onOpen: () => void;
 }) {
   const {data: items = []} = useHistory({vault: vaultAddress, enabled: Boolean(vaultAddress)});

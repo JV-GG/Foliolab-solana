@@ -72,24 +72,31 @@ anchor build --arch v0
 cargo test -p folio_vault      # full flow + refusal cases, no validator needed
 ```
 
-### Deploy to devnet
-
-_Deploy script and resulting addresses: to be added._
-
-### App
+### Local validator (no devnet SOL needed)
 
 ```bash
-npm run dev                    # http://localhost:3000, curator console at /curator
+npm run validator                              # terminal 1: programs preloaded
+solana -u localhost airdrop 100                # terminal 2
+CLUSTER=localnet npm run setup:solana          # mock tokens, registry, demo vault → lib/solana/addresses.json
+npm run dev                                    # with NEXT_PUBLIC_SOLANA_CLUSTER=localnet in .env.local
+APP_URL=http://localhost:3000 CLUSTER=localnet npm run smoke:solana   # faucet → deposit → rebalance → redeem
+```
+
+### Devnet
+
+```bash
+cd anchor && anchor deploy --provider.cluster devnet && cd ..
+CLUSTER=devnet npm run setup:solana
 ```
 
 ## Status
 
 | Part | State |
 |---|---|
-| Solana program + tests | Done (11 tests passing) |
-| Devnet deployment | To do |
-| Backend (ed25519 price signer, Solana reads) | To do |
-| Frontend (Solana wallet adapter) | To do |
+| Solana program + tests | Done (11 LiteSVM tests passing) |
+| Setup script, backend API, frontend (wallet adapter) | Done; end-to-end smoke test passes on a local validator |
+| Devnet deployment | To do (waiting on devnet SOL) |
+| Vercel | To do |
 
 ## Limits and known issues
 

@@ -1,12 +1,9 @@
 import type {Holding} from '@/lib/contracts/hooks';
+import {tokenByMint} from '@/lib/solana/config';
 
 const COLORS = ['#4de5ca', '#a893ff', '#f1b94f', '#63adff', '#ef7898', '#ed8358', '#79d995', '#d47ee0'];
-const KNOWN_COLORS: Record<string, string> = {
-  '0x55d398326f99059ff775485246999027b3197955': '#4de5ca',
-  '0x390a684ef9cade28a7ad0dfa61ab1eb3842618c4': '#a893ff',
-  '0xa9ee28c80f960b889dfbd1902055218cba016f75': '#f1b94f',
-  '0x6bfe75d1ad432050ea973c3a3dcd88f02e2444c3': '#63adff',
-};
+/** Fixed colours for the settlement token and the first stocks, by symbol. */
+const KNOWN_COLORS: Record<string, string> = {USDC: '#4de5ca', AAPLx: '#a893ff', NVDAx: '#f1b94f', TSLAx: '#63adff'};
 
 export const SHARE_SCALE = BigInt(1_000_000);
 
@@ -40,10 +37,10 @@ export type AssetMix =
 
 // A token receives the same deterministic color in every vault.
 export function assetColor(address: string): string {
-  const normalized = address.toLowerCase();
-  const known = KNOWN_COLORS[normalized];
+  const symbol = tokenByMint(address)?.symbol;
+  const known = symbol ? KNOWN_COLORS[symbol] : undefined;
   if (known) return known;
-  return COLORS[hashString(normalized) % COLORS.length];
+  return COLORS[hashString(address) % COLORS.length];
 }
 
 // Missing prices on any non-zero holding make the entire value mix unavailable.

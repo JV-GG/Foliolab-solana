@@ -1,9 +1,8 @@
 'use client';
 
 import {useMemo, useState} from 'react';
-import type {Address} from 'viem';
-import {useConnection} from 'wagmi';
-import {appChain} from '@/lib/contracts/wagmi';
+import {useConnection} from '@/lib/contracts/wallet';
+import {explorerUrl} from '@/lib/contracts/wallet';
 import {shortAddress} from '@/lib/domain/format';
 import {useHistory} from '@/lib/history/hooks';
 import type {ActivityItem, ActivityType} from '@/lib/history/types';
@@ -60,7 +59,7 @@ export function ActivityFeed({vaults, onSelectVault}: Props) {
   const [category, setCategory] = useState<FilterCategory>('all');
   const [selectedVault, setSelectedVault] = useState<string>('all');
   const [copiedTx, setCopiedTx] = useState<string | null>(null);
-  const vaultAddress = selectedVault !== 'all' ? (selectedVault as Address) : undefined;
+  const vaultAddress = selectedVault !== 'all' ? (selectedVault as string) : undefined;
 
   const {data: items = [], isLoading, error, refetch, isFetching} = useHistory({vault: vaultAddress});
 
@@ -219,7 +218,6 @@ function ActivityRow({
   onCopy: (tx: string) => void;
   copied: boolean;
 }) {
-  const isBsc = appChain.id === 56;
 
   return (
     <article className="flex flex-col gap-3 py-5 transition hover:bg-[#f7f8f3]/45 sm:flex-row sm:items-center sm:justify-between sm:gap-5 sm:px-2">
@@ -239,26 +237,20 @@ function ActivityRow({
             <span className="text-[9px] text-[#8a938b]">{timeAgo(item.timestamp)}</span>
           </div>
           <div className="mt-1.5 text-[11px] leading-5 text-[#59645c]">{renderActivityContent(item)}</div>
-          <span className="mt-1.5 inline-block text-[8px] text-[#879088]">BLOCK {item.blockNumber}</span>
+          <span className="mt-1.5 inline-block text-[8px] text-[#879088]">SLOT {item.blockNumber}</span>
         </div>
       </div>
 
       <div className="flex shrink-0 items-center gap-2 self-end sm:self-center">
-        {isBsc ? (
-          <a
-            href={`https://bscscan.com/tx/${item.txHash}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="View on BscScan"
-            className="text-[9px] text-[#59645c] hover:underline"
-          >
-            {shortAddress(item.txHash)} EXTERNAL
-          </a>
-        ) : (
-          <span title="Local test-chain transaction" className="text-[9px] text-[#788179]">
-            {shortAddress(item.txHash)} LOCAL
-          </span>
-        )}
+        <a
+          href={explorerUrl('tx', item.txHash)}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="View on Solana Explorer"
+          className="text-[9px] text-[#59645c] hover:underline"
+        >
+          {shortAddress(item.txHash)} EXTERNAL
+        </a>
         <button
           type="button"
           onClick={() => onCopy(item.txHash)}
@@ -290,7 +282,7 @@ function renderActivityContent(item: ActivityItem) {
     case 'deposit':
       return (
         <span>
-          Deposited <strong className={strong}>{formatDecimal(item.usdtAmount)} USDT</strong> into the vault and minted{' '}
+          Deposited <strong className={strong}>{formatDecimal(item.usdtAmount)} USDC</strong> into the vault and minted{' '}
           <strong className={strong}>{formatDecimal(item.sharesMinted)} shares</strong>
           <span className="ml-1 text-[#7b847c]">by {shortAddress(item.investor)}</span>
         </span>
@@ -326,7 +318,7 @@ function renderActivityContent(item: ActivityItem) {
     case 'seed':
       return (
         <span>
-          Seeded with <strong className={strong}>{formatDecimal(item.usdtAmount)} USDT</strong> and minted{' '}
+          Seeded with <strong className={strong}>{formatDecimal(item.usdtAmount)} USDC</strong> and minted{' '}
           <strong className={strong}>{formatDecimal(item.sharesMinted)} initial shares</strong>
         </span>
       );

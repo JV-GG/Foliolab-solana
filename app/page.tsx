@@ -17,14 +17,14 @@ export default function HomePage() {
             <div className="max-w-[610px] folio-enter">
               <div className="inline-flex items-center gap-2 rounded-full border border-[#bfc9bd] bg-white/60 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.13em] text-[#526158] backdrop-blur">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#237b68]" />
-                Built on BNB Chain
+                Built on Solana
               </div>
 
               <h1 className="mt-7 max-w-[600px] text-[clamp(46px,5.1vw,76px)] font-semibold leading-[0.99] tracking-[-0.058em] text-[#223229]">
                 Invest in the plan.<br />Own every position.
               </h1>
               <p className="mt-7 max-w-[540px] text-[clamp(16px,1.3vw,19px)] leading-[1.65] text-[#5c685f]">
-                Explore transparent stock vaults, deposit USDT, and receive a proportional claim on every token the vault holds.
+                Explore transparent stock vaults, deposit USDC, and receive a proportional claim on every token the vault holds.
               </p>
 
               <div className="mt-9 flex flex-col gap-3 xs:flex-row">
@@ -69,8 +69,8 @@ export default function HomePage() {
 
             <div className="divide-y divide-[#41675d] border-y border-[#41675d]">
               <ProcessStep number="01" title="Inspect the strategy" detail="Read the published plan, current holdings, manager address, and available pricing." />
-              <ProcessStep number="02" title="Invest with USDT" detail="Signed prices protect the share calculation before your deposit is confirmed on-chain." />
-              <ProcessStep number="03" title="Redeem the portfolio" detail="Withdraw your proportional share of USDT and held stock tokens in kind, including when paused." />
+              <ProcessStep number="02" title="Invest with USDC" detail="Signed prices protect the share calculation before your deposit is confirmed on-chain." />
+              <ProcessStep number="03" title="Redeem the portfolio" detail="Withdraw your proportional share of USDC and held stock tokens in kind, including when paused." />
             </div>
           </div>
         </section>

@@ -2,47 +2,40 @@
 
 /**
  * Investor-side data and transactions. Reads valuations from /api/vaults and sends deposits and
- * redemptions from the connected wallet. The contract is the authority: share counts shown after
- * a transaction come from the confirmed receipt, not from these estimates.
+ * redemptions from the connected wallet. The program is the authority: these estimates are only
+ * used to bound slippage and to show what a withdrawal pays out.
  */
 import {useQuery, useQueryClient} from '@tanstack/react-query';
+import {useConnection as useSolanaConnection} from '@solana/wallet-adapter-react';
+import {Connection, PublicKey, SystemProgram} from '@solana/web3.js';
+import {
+  createAssociatedTokenAccountIdempotentInstruction,
+  TOKEN_2022_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+} from '@solana/spl-token';
 import {useCallback, useState} from 'react';
-import {BaseError, ContractFunctionRevertedError, UserRejectedRequestError, parseUnits, type Address, type Hex} from 'viem';
-import {useConfig, useConnection, type Config} from 'wagmi';
-import {getTransactionReceipt, readContract, simulateContract, waitForTransactionReceipt, writeContract} from 'wagmi/actions';
 import type {VaultView} from '@/lib/vaults/read';
-import {erc20Abi, folioVaultAbi} from './abis';
 import {HISTORY_KEY} from '@/lib/history/hooks';
+import {
+  BN,
+  ata,
+  folioProgram,
+  heldAccounts,
+  positionPda,
+  priceSignatureIx,
+  registryPda,
+  toPriceArg,
+  tokenProgramsOf,
+  usdToUnits,
+  type SignedPricesJson,
+} from '@/lib/solana/program';
+import folioIdl from '@/lib/solana/idl/folio_vault.json';
+import {useConnection, useSendTransaction} from './wallet';
 
 export type {VaultView, Holding} from '@/lib/vaults/read';
 
-const VAULTS_KEY = 'vaults';
-const RECEIPT_TIMEOUT_MS = 75_000;
-
-/**
- * Waits for a successful receipt without leaving the UI in a permanent pending state.
- * Some injected wallets stop forwarding subscription updates after the approval prompt;
- * a direct receipt lookup recovers transactions that were mined during that gap.
- */
-export async function waitForSuccessfulReceipt(config: Config, hash: Hex) {
-  let receipt;
-  try {
-    receipt = await waitForTransactionReceipt(config, {
-      hash,
-      pollingInterval: 1_000,
-      timeout: RECEIPT_TIMEOUT_MS,
-    });
-  } catch (waitError) {
-    try {
-      receipt = await getTransactionReceipt(config, {hash});
-    } catch {
-      throw waitError;
-    }
-  }
-
-  if (receipt.status !== 'success') throw new Error('The transaction failed on-chain.');
-  return receipt;
-}
+export const VAULTS_KEY = 'vaults';
+const SYSVAR_INSTRUCTIONS = new PublicKey('Sysvar1nstructions1111111111111111111111111');
 
 /** All vaults, with the connected wallet's position in each. Refreshes every 15 s. */
 export function useVaults() {
@@ -59,105 +52,136 @@ export function useVaults() {
   });
 }
 
-/** Turns a wallet or contract failure into a sentence an investor can act on. */
+const PROGRAM_ERRORS = new Map<number, string>(folioIdl.errors.map((e) => [e.code, e.name]));
+
+/** The program's error name inside a wallet/RPC failure, if there is one. */
+export function programErrorName(error: unknown): string | null {
+  const text = [String((error as {message?: string})?.message ?? ''), ...(((error as {logs?: string[]})?.logs) ?? [])].join('\n');
+  const named = /Error Code: (\w+)/.exec(text);
+  if (named) return named[1];
+  const hex = /custom program error: 0x([0-9a-f]+)/i.exec(text);
+  if (hex) return PROGRAM_ERRORS.get(parseInt(hex[1], 16)) ?? null;
+  return null;
+}
+
+/** Turns a wallet or program failure into a sentence an investor can act on. */
 export function explainError(error: unknown): string {
-  if (error instanceof BaseError) {
-    if (error.walk((e) => e instanceof UserRejectedRequestError)) return 'You cancelled the request in your wallet.';
-    if (error.message?.includes('nonce too low') || error.shortMessage?.includes('nonce too low')) {
-      return 'Wallet transaction nonce is out of sync with Anvil. In MetaMask: Settings ➔ Advanced ➔ "Clear activity tab data", then retry.';
-    }
-    const revert = error.walk((e) => e instanceof ContractFunctionRevertedError);
-    if (revert instanceof ContractFunctionRevertedError) {
-      switch (revert.data?.errorName) {
-        case 'StalePrices':
-          return 'The signed prices expired before the deposit landed. Try again.';
-        case 'InvalidPriceSignature':
-          return 'The price signature was rejected. The server key may not match the registry.';
-        case 'SlippageTooHigh':
-          return 'Prices moved and you would get fewer shares than expected. Try again.';
-        case 'WrongState':
-          return 'This vault is not accepting deposits right now (it may be paused).';
-        case 'MissingPrice':
-        case 'ZeroPrice':
-          return 'One of the vault’s holdings has no price right now, so deposits are paused.';
-        case 'ZeroShares':
-          return 'That amount is too small to mint any shares.';
-        case 'ERC20InsufficientBalance':
-          return 'You do not have enough for this.';
-        default:
-          if (revert.data?.errorName) return `The vault rejected this: ${revert.data.errorName}.`;
-      }
-    }
-    return error.shortMessage;
+  const message = String((error as {message?: string})?.message ?? '');
+  if (/rejected|declined|cancel/i.test(message)) {
+    return 'You cancelled the request in your wallet.';
   }
-  return error instanceof Error ? error.message : 'Something went wrong.';
+  switch (programErrorName(error)) {
+    case 'StalePrices':
+      return 'The signed prices expired before the transaction landed. Try again.';
+    case 'InvalidPriceSignature':
+      return 'The price signature was rejected. The server key may not match the registry.';
+    case 'SlippageTooHigh':
+      return 'Prices moved and you would get fewer shares than expected. Try again.';
+    case 'WrongState':
+      return 'This vault is not accepting this right now (it may be paused or not yet active).';
+    case 'MissingPrice':
+    case 'ZeroPrice':
+      return 'One of the vault’s holdings has no price right now, so deposits are paused.';
+    case 'ZeroShares':
+      return 'That amount is too small to mint any shares.';
+    case 'InsufficientShares':
+      return 'You do not hold that many shares.';
+    case 'TradeLossTooHigh':
+      return 'This trade would lose more than 2% against market prices, so the vault refused it.';
+    case 'NoPlanPosted':
+      return 'Post a plan before the first trade.';
+    case null:
+      break;
+    default:
+      return `The vault rejected this: ${programErrorName(error)}.`;
+  }
+  if (/insufficient (funds|lamports)|0x1\b/i.test(message)) return 'You do not have enough for this (USDC, or SOL for fees).';
+  if (/Attempt to debit an account but found no record of a prior credit/i.test(message)) {
+    return 'Your wallet has no SOL on this network to pay fees. Get some from faucet.solana.com.';
+  }
+  return message || 'Something went wrong.';
 }
 
 export type DepositStep = 'idle' | 'approving' | 'pricing' | 'depositing' | 'done';
 
-interface SignedPrices {
-  update: {assets: Address[]; prices: string[]; timestamp: string};
-  signature: Hex;
-}
-
-/** Bounds the deposit at 0.5% fewer shares than the simulation, in case prices tick. */
+/** Bounds the deposit at 0.5% fewer shares than the estimate, in case balances change first. */
 const MIN_SHARES_BPS = BigInt(9_950);
 
+/** Fresh on-chain view of a vault: held mints, their token programs, balances and share supply. */
+async function vaultSnapshot(connection: Connection, vault: PublicKey) {
+  const program = folioProgram(connection);
+  const v = await program.account.vault.fetch(vault);
+  const programs = await tokenProgramsOf(connection, v.held);
+  const balances = await Promise.all(
+    v.held.map(async (mint) => {
+      const r = await connection.getTokenAccountBalance(ata(vault, mint, programs.get(mint.toBase58())!)).catch(() => null);
+      return {amount: BigInt(r?.value.amount ?? '0'), decimals: r?.value.decimals ?? 0};
+    }),
+  );
+  return {program, v, programs, balances};
+}
+
 export function useDeposit() {
-  const config = useConfig();
+  const {connection} = useSolanaConnection();
   const queryClient = useQueryClient();
   const {address} = useConnection();
+  const send = useSendTransaction();
   const [step, setStep] = useState<DepositStep>('idle');
 
   const deposit = useCallback(
-    async (vault: Address, amountText: string): Promise<{shares: bigint; amount: bigint}> => {
+    async (vaultAddress: string, amountText: string): Promise<{shares: bigint; amount: bigint}> => {
       if (!address) throw new Error('Connect a wallet first.');
-      const usdt = await readContract(config, {address: vault, abi: folioVaultAbi, functionName: 'settlementToken'});
-      const decimals = await readContract(config, {address: usdt, abi: erc20Abi, functionName: 'decimals'});
-      const amount = parseUnits(amountText, decimals);
+      const amount = usdToUnits(amountText, 6);
       if (amount <= BigInt(0)) throw new Error('Enter an amount above zero.');
+      const investor = new PublicKey(address);
+      const vault = new PublicKey(vaultAddress);
 
       try {
-        const allowance = await readContract(config, {
-          address: usdt,
-          abi: erc20Abi,
-          functionName: 'allowance',
-          args: [address, vault],
-        });
-        if (allowance < amount) {
-          setStep('approving');
-          const hash = await writeContract(config, {address: usdt, abi: erc20Abi, functionName: 'approve', args: [vault, amount]});
-          await waitForSuccessfulReceipt(config, hash);
-        }
-
-        // Signed prices live 60 s, so fetch them only once the approval has landed.
+        // Signed prices live 60 s, so fetch them right before sending.
         setStep('pricing');
-        const res = await fetch(`/api/prices?vault=${vault}`, {cache: 'no-store'});
-        const body = await res.json();
-        if (!res.ok) throw new Error(body.error ?? 'Could not get signed prices');
-        const signed = body as SignedPrices;
-        const update = {
-          assets: signed.update.assets,
-          prices: signed.update.prices.map(BigInt),
-          timestamp: BigInt(signed.update.timestamp),
-        };
+        const res = await fetch(`/api/prices?vault=${vault.toBase58()}`, {cache: 'no-store'});
+        const signed = (await res.json()) as SignedPricesJson & {error?: string};
+        if (!res.ok) throw new Error(signed.error ?? 'Could not get signed prices');
+
+        // Estimate shares exactly as the program will: holdings at the signed prices, rounded up.
+        const {program, v, programs, balances} = await vaultSnapshot(connection, vault);
+        const usdc = v.settlementMint;
+        let value = BigInt(0);
+        v.held.forEach((mint, i) => {
+          const {amount: bal, decimals} = balances[i];
+          if (bal === BigInt(0)) return;
+          if (mint.equals(usdc)) {
+            value += bal;
+            return;
+          }
+          const p = signed.update.mints.indexOf(mint.toBase58());
+          if (p < 0) throw new Error('One of the vault’s holdings has no price right now, so deposits are paused.');
+          const unit = BigInt(10) ** BigInt(decimals);
+          value += (bal * BigInt(signed.update.prices[p]) + unit - BigInt(1)) / unit;
+        });
+        if (value === BigInt(0)) throw new Error('This vault holds nothing yet.');
+        const expected = (amount * BigInt(v.totalShares.toString())) / value;
+        const minShares = (expected * MIN_SHARES_BPS) / BigInt(10_000);
 
         setStep('depositing');
-        const {result: expected} = await simulateContract(config, {
-          address: vault,
-          abi: folioVaultAbi,
-          functionName: 'deposit',
-          args: [amount, update, signed.signature, BigInt(0)],
-          account: address,
-        });
-        const minShares = (expected * MIN_SHARES_BPS) / BigInt(10_000);
-        const hash = await writeContract(config, {
-          address: vault,
-          abi: folioVaultAbi,
-          functionName: 'deposit',
-          args: [amount, update, signed.signature, minShares],
-        });
-        await waitForSuccessfulReceipt(config, hash);
+        const ix = await program.methods
+          .deposit(new BN(amount.toString()), new BN(minShares.toString()), toPriceArg(signed.update))
+          .accountsPartial({
+            investor,
+            registry: registryPda(),
+            vault,
+            position: positionPda(vault, investor),
+            settlementMint: usdc,
+            investorSettlement: ata(investor, usdc, TOKEN_PROGRAM_ID),
+            vaultSettlement: ata(vault, usdc, TOKEN_PROGRAM_ID),
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            instructions: SYSVAR_INSTRUCTIONS,
+          })
+          .remainingAccounts(heldAccounts(vault, v.held, programs))
+          .instruction();
+        // The Ed25519 instruction must come directly before `deposit`.
+        await send([priceSignatureIx(signed), ix]);
 
         setStep('done');
         await Promise.all([
@@ -170,7 +194,7 @@ export function useDeposit() {
         throw error;
       }
     },
-    [address, config, queryClient],
+    [address, connection, queryClient, send],
   );
 
   const reset = useCallback(() => setStep('idle'), []);
@@ -178,43 +202,62 @@ export function useDeposit() {
 }
 
 export interface RedeemResult {
-  assets: readonly Address[];
+  assets: readonly string[];
   amounts: readonly bigint[];
 }
 
 /**
- * Withdrawals always go through `redeemExcept`: with an empty `forfeit` list it is identical to
- * `redeem` (contract-tested). Listing a token leaves it behind for the remaining holders, the
- * escape hatch when its issuer has paused it, so one stuck token never blocks an exit.
+ * `forfeit` lists mints to leave behind for the remaining holders: the escape hatch when a token's
+ * issuer has frozen it, so one stuck token never blocks an exit.
  */
-function redeemCall(vault: Address, shares: bigint, to: Address, forfeit: readonly Address[]) {
-  return {address: vault, abi: folioVaultAbi, functionName: 'redeemExcept', args: [shares, to, forfeit]} as const;
-}
-
 export function useRedeem() {
-  const config = useConfig();
+  const {connection} = useSolanaConnection();
   const queryClient = useQueryClient();
   const {address} = useConnection();
+  const send = useSendTransaction();
   const [pending, setPending] = useState(false);
 
-  /** What redeeming `shares` would pay out right now, in kind. */
+  /** What redeeming `shares` would pay out right now, in kind (same rounding as the program). */
   const preview = useCallback(
-    async (vault: Address, shares: bigint, forfeit: readonly Address[] = []): Promise<RedeemResult> => {
-      if (!address) throw new Error('Connect a wallet first.');
-      const {result} = await simulateContract(config, {...redeemCall(vault, shares, address, forfeit), account: address});
-      return {assets: result[0], amounts: result[1]};
+    async (vaultAddress: string, shares: bigint, forfeit: readonly string[] = []): Promise<RedeemResult> => {
+      const {v, balances} = await vaultSnapshot(connection, new PublicKey(vaultAddress));
+      const supply = BigInt(v.totalShares.toString());
+      return {
+        assets: v.held.map((m) => m.toBase58()),
+        amounts: v.held.map((m, i) => (forfeit.includes(m.toBase58()) || supply === BigInt(0) ? BigInt(0) : (balances[i].amount * shares) / supply)),
+      };
     },
-    [address, config],
+    [connection],
   );
 
   const redeem = useCallback(
-    async (vault: Address, shares: bigint, forfeit: readonly Address[] = []): Promise<RedeemResult> => {
+    async (vaultAddress: string, shares: bigint, forfeit: readonly string[] = []): Promise<RedeemResult> => {
       if (!address) throw new Error('Connect a wallet first.');
       setPending(true);
       try {
-        const out = await preview(vault, shares, forfeit);
-        const hash = await writeContract(config, redeemCall(vault, shares, address, forfeit));
-        await waitForSuccessfulReceipt(config, hash);
+        const owner = new PublicKey(address);
+        const vault = new PublicKey(vaultAddress);
+        const out = await preview(vaultAddress, shares, forfeit);
+        const {program, v, programs} = await vaultSnapshot(connection, vault);
+        // Make sure the wallet has an account for every token it is about to receive.
+        const createAccounts = v.held
+          .filter((mint, i) => out.amounts[i] > BigInt(0))
+          .map((mint) => {
+            const p = programs.get(mint.toBase58())!;
+            return createAssociatedTokenAccountIdempotentInstruction(owner, ata(owner, mint, p), owner, mint, p);
+          });
+        const ix = await program.methods
+          .redeem(new BN(shares.toString()), forfeit.map((m) => new PublicKey(m)))
+          .accountsPartial({
+            owner,
+            vault,
+            position: positionPda(vault, owner),
+            tokenProgram: TOKEN_PROGRAM_ID,
+            token2022Program: TOKEN_2022_PROGRAM_ID,
+          })
+          .remainingAccounts(heldAccounts(vault, v.held, programs, owner))
+          .instruction();
+        await send([...createAccounts, ix]);
         await Promise.all([
           queryClient.invalidateQueries({queryKey: [VAULTS_KEY]}),
           queryClient.invalidateQueries({queryKey: [HISTORY_KEY]}),
@@ -224,8 +267,25 @@ export function useRedeem() {
         setPending(false);
       }
     },
-    [address, config, preview, queryClient],
+    [address, connection, preview, queryClient, send],
   );
 
   return {redeem, preview, pending};
+}
+
+/** The connected wallet's balance of `mint` in base units, refreshed every 10 s. */
+export function useTokenBalance(mint: string | undefined) {
+  const {connection} = useSolanaConnection();
+  const {address} = useConnection();
+  return useQuery({
+    queryKey: ['token-balance', mint ?? null, address ?? null],
+    enabled: Boolean(mint && address),
+    queryFn: async (): Promise<bigint> => {
+      const owner = new PublicKey(address!);
+      const program = (await connection.getAccountInfo(new PublicKey(mint!)))?.owner ?? TOKEN_PROGRAM_ID;
+      const r = await connection.getTokenAccountBalance(ata(owner, new PublicKey(mint!), program)).catch(() => null);
+      return BigInt(r?.value.amount ?? '0');
+    },
+    refetchInterval: 10_000,
+  });
 }

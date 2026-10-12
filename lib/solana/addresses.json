@@ -1,0 +1,39 @@
+{
+  "localnet": {
+    "registry": "4on5rPymYh1W7sLe6LA3WYwXBR2wgBG5KiqSrMucQHC1",
+    "usdc": "Ct2KCg2x565rvc9DAz16BEqr8enaAs2TWWzapqT3BGFN",
+    "faucet": "85xCXm8FssMF2zxgvMu7nZcq8fckWCJFmkWuv6Bxo2UR",
+    "tokens": [
+      {
+        "symbol": "USDC",
+        "name": "USD Coin (devnet mock)",
+        "mint": "Ct2KCg2x565rvc9DAz16BEqr8enaAs2TWWzapqT3BGFN",
+        "decimals": 6
+      },
+      {
+        "symbol": "AAPLx",
+        "name": "Apple (mock xStock)",
+        "mint": "EtM6c3XaeThMZ75VEh9sAAVA5f1G7XyYqJf53WVmJzym",
+        "decimals": 8,
+        "underlying": "AAPL"
+      },
+      {
+        "symbol": "NVDAx",
+        "name": "NVIDIA (mock xStock)",
+        "mint": "E1poDaw9Qmk4EjNs3pJqCKCHrRFTgDRN6fMegDUPDmQ5",
+        "decimals": 8,
+        "underlying": "NVDA"
+      },
+      {
+        "symbol": "TSLAx",
+        "name": "Tesla (mock xStock)",
+        "mint": "9xdSGNBhxAtXh7pzN4RVKS2MftZp9ozc9NUr575iA1As",
+        "decimals": 8,
+        "underlying": "TSLA"
+      }
+    ],
+    "vaults": [
+      "2cRhpsvAaLDE4e18rjrLczM1zBkwFMgZUU9mdNqWk4X9"
+    ]
+  }
+}

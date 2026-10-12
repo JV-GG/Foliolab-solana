@@ -3,7 +3,7 @@
 import {useState} from 'react';
 
 const holdings = [
-  {symbol: 'USDT', name: 'Cash reserve', value: '$9,944.16', allocation: '40%', color: '#27bfa3'},
+  {symbol: 'USDC', name: 'Cash reserve', value: '$9,944.16', allocation: '40%', color: '#27bfa3'},
   {symbol: 'AAPLon', name: 'Apple token', value: '$8,701.14', allocation: '35%', color: '#8f6ee8'},
   {symbol: 'NVDAon', name: 'Nvidia token', value: '$6,215.10', allocation: '25%', color: '#e9ad38'},
 ] as const;
@@ -108,7 +108,7 @@ export function HomeProductPreview() {
 
             <div className="mt-6 rounded-[18px] bg-[#21483d] px-4 py-4 text-white">
               <div className="flex items-center justify-between gap-3"><span className="text-[9px] text-[#b8d4ca]">Published strategy</span><span className="rounded-full bg-white/10 px-2 py-1 text-[8px]">On-chain</span></div>
-              <p className="mt-3 text-[11px] font-medium leading-5 text-[#f3f6f3]">Diversified technology exposure with a liquid USDT reserve.</p>
+              <p className="mt-3 text-[11px] font-medium leading-5 text-[#f3f6f3]">Diversified technology exposure with a liquid USDC reserve.</p>
             </div>
           </div>
         </div>

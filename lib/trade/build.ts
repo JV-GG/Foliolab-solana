@@ -1,34 +1,53 @@
 /**
- * Turns a Binance quote into the `TradeRequest` the manager passes to
- * `vault.rebalance(t, prices, signature)` (spec §6, AGENTS.md shared interfaces). The router
- * calldata is opaque; the contract's balance checks and its 2% loss cap at the signed prices are
- * what make it safe, so this module's job is to refuse anything the contract should never be asked
- * to run and to fill in honest bounds. The signed prices come from `/api/prices` with
- * `include=<buy token>`.
+ * Builds the swap a manager passes to `rebalance(max_sell, min_buy, route_data, prices)`.
+ *
+ * Devnet/localnet: the route is a `mock_router.swap` instruction that fills at the live price less
+ * a 0.3% fee. Mainnet (not built yet): a Jupiter `/swap-instructions` route with the vault PDA as
+ * the user. Either way the route is opaque to the program; its balance, authority and 2% loss
+ * checks at the signed prices are what make it safe. This module refuses what the program would
+ * reject and fills in honest bounds. Signed prices come from `/api/prices?include=<buy mint>`.
  */
-import {getAddress, isAddress, type Address, type Hex} from 'viem';
-import {buildSwap, getRwaTokens, getSwapQuote} from '@/lib/binance/queries';
-import {ApiError, isChainDown, publicClient} from '@/lib/chain/server';
-import {assetRegistryAbi, erc20Abi, folioVaultAbi} from '@/lib/contracts/abis';
+import {PublicKey} from '@solana/web3.js';
+import {ApiError, connection, parseKey, vaultReadError} from '@/lib/chain/server';
+import {displayPrices} from '@/lib/pricing/source';
 import {MAX_TRADE_LOSS_BPS, tradeLossPercent} from '@/lib/pricing/rules';
-import {VAULT_STATES, vaultPlanAbi} from '@/lib/vaults/read';
+import {
+  BN,
+  ata,
+  folioProgram,
+  poolPda,
+  registryPda,
+  routerProgram,
+  tokenProgramsOf,
+  vaultStateName,
+  ROUTER_PROGRAM_ID,
+} from '@/lib/solana/program';
+import {CLUSTER, tokenByMint} from '@/lib/solana/config';
 
 export const DEFAULT_SLIPPAGE_PERCENT = '1';
-/** Wallets underestimate `rebalance`; a real swap on a BSC fork used ~850k gas. */
-export const REBALANCE_GAS_LIMIT = '1500000';
-/** FolioVault.MAX_ASSETS: most tokens a vault may hold, USDT included. */
+/** Compute units to request for the rebalance transaction (a mock swap uses well under this). */
+export const REBALANCE_COMPUTE_UNITS = 400_000;
+/** The mock router's fee, in basis points. */
+const MOCK_FEE_BPS = BigInt(30);
 const MAX_ASSETS = 10;
-/** BSC-USD, valued at $1 like the contract's settlement token. */
-const BSC_USDT = '0x55d398326f99059fF775485246999027B3197955';
 
-/** Field-for-field the Solidity struct; amounts are raw base units as strings. */
+export interface RouteAccount {
+  pubkey: string;
+  isSigner: boolean;
+  isWritable: boolean;
+}
+
+/** Everything `rebalance` needs besides the signed prices. Amounts are raw base units. */
 export interface TradeRequest {
-  router: Address;
-  sellToken: Address;
-  buyToken: Address;
-  maxSellAmount: string;
-  minBuyAmount: string;
-  callData: Hex;
+  router: string;
+  sellMint: string;
+  buyMint: string;
+  maxSell: string;
+  minBuy: string;
+  /** The router instruction's data, base64. */
+  routeData: string;
+  /** The router instruction's accounts in order, vault marked not signer. Append after the held accounts. */
+  routeAccounts: RouteAccount[];
 }
 
 export interface BuiltTrade {
@@ -37,12 +56,11 @@ export interface BuiltTrade {
     expectedBuyAmount: string;
     slippagePercent: string;
     route: string[];
-    /** Value the quote gives up at Binance's token prices, in percent; null when unpriced. */
+    /** Value the quote gives up at live prices, in percent; null when unpriced. */
     lossPercent: number | null;
   };
-  /** Send `rebalance` with this gas limit; wallet estimates come out too low. */
-  gasLimit: string;
-  /** Problems the contract will reject on; shown, not thrown, so development on a fork works. */
+  computeUnits: number;
+  /** Problems the program will reject on; shown, not thrown. */
   warnings: string[];
 }
 
@@ -54,133 +72,119 @@ export interface TradeParams {
   slippage?: string;
 }
 
-function address(value: string, name: string): Address {
-  if (!isAddress(value)) throw new ApiError(`${name} must be an address`, 400);
-  return getAddress(value);
+function priceUnits(usd: string): bigint {
+  const [whole, frac = ''] = usd.split('.');
+  return BigInt(whole + frac.slice(0, 6).padEnd(6, '0'));
 }
 
 export async function buildTrade(params: TradeParams): Promise<BuiltTrade> {
-  const vault = address(params.vault, 'vault');
-  const sell = address(params.sell, 'sell');
-  const buy = address(params.buy, 'buy');
-  if (sell === buy) throw new ApiError('sell and buy must differ', 400);
+  if (CLUSTER === 'mainnet-beta') throw new ApiError('Mainnet routing through Jupiter is not built yet', 501);
+  const vault = parseKey(params.vault, 'vault');
+  const sell = parseKey(params.sell, 'sell');
+  const buy = parseKey(params.buy, 'buy');
+  if (sell.equals(buy)) throw new ApiError('sell and buy must differ', 400);
   if (!/^[1-9]\d*$/.test(params.amount)) {
     throw new ApiError('amount must be a positive integer in the sell token’s base units', 400);
   }
   const slippage = params.slippage ?? DEFAULT_SLIPPAGE_PERCENT;
-  const slippageNum = Number(slippage);
-  if (!Number.isFinite(slippageNum) || slippageNum <= 0 || slippageNum > 5) {
+  const slippageBps = Math.round(Number(slippage) * 100);
+  if (!Number.isFinite(slippageBps) || slippageBps < 0 || slippageBps > 500) {
     throw new ApiError('slippage must be a percentage between 0 and 5', 400);
   }
+  const amountIn = BigInt(params.amount);
 
-  // The vault is the trader: Ondo market makers price for the address that sends the swap.
-  const swapArgs = {fromTokenAddress: sell, toTokenAddress: buy, amount: params.amount, userWalletAddress: vault};
-  const quotes = await getSwapQuote(swapArgs);
-  if (!quotes.ok) throw new ApiError(`Could not get a Binance quote right now. (${quotes.error})`, 503);
-  const best = quotes.data[0];
-  if (!best) throw new ApiError('No route for this pair and size', 422);
-
-  const swap = await buildSwap({...swapArgs, quoteId: best.quoteId, slippagePercent: slippage});
-  if (!swap.ok) throw new ApiError(`Could not build the Binance swap right now. (${swap.error})`, 503);
-  const {tx} = swap.data;
-
-  // A signed RFQ order cannot be executed by a contract; never hand one to the vault (spec §8.1).
-  if (swap.data.executionMode !== 'SWAP' || swap.data.rfq || tx.signatureData) {
-    throw new ApiError(`Route needs a signed RFQ order (${swap.data.executionMode}); a vault cannot trade it`, 422);
+  const conn = connection();
+  const program = folioProgram(conn);
+  let v;
+  try {
+    v = await program.account.vault.fetch(vault);
+  } catch (error) {
+    throw vaultReadError(error, vault.toBase58());
   }
-  if (BigInt(tx.value || '0') !== BigInt(0)) throw new ApiError('Route expects native BNB; refusing', 422);
-  if (!isAddress(tx.to)) throw new ApiError('Binance returned no router address', 502);
+  const registry = await program.account.registry.fetch(registryPda());
+  const usdc = registry.settlementMint.toBase58();
+  const programs = await tokenProgramsOf(conn, [sell, buy]);
+  const [sellInfo, buyInfo] = [tokenByMint(sell), tokenByMint(buy)];
+  if (!sellInfo || !buyInfo) throw new ApiError('Unknown token on this cluster', 400);
 
-  const trade: TradeRequest = {
-    router: getAddress(tx.to),
-    sellToken: sell,
-    buyToken: buy,
-    maxSellAmount: params.amount,
-    minBuyAmount: tx.minReceiveAmount,
-    callData: tx.data as Hex,
-  };
+  // Quote: both legs in USDC units per whole token.
+  const live = await displayPrices([sell, buy].map((m) => m.toBase58()).filter((m) => m !== usdc));
+  const priceOf = (mint: PublicKey) => (mint.toBase58() === usdc ? '1' : live.get(mint.toBase58()));
+  const [sellUsd, buyUsd] = [priceOf(sell), priceOf(buy)];
+  if (!sellUsd || !buyUsd) throw new ApiError(`No live price for ${!sellUsd ? sellInfo.symbol : buyInfo.symbol}`, 503);
+  const expected =
+    (amountIn * priceUnits(sellUsd) * BigInt(10) ** BigInt(buyInfo.decimals) * (BigInt(10_000) - MOCK_FEE_BPS)) /
+    (priceUnits(buyUsd) * BigInt(10) ** BigInt(sellInfo.decimals) * BigInt(10_000));
+  if (expected === BigInt(0)) throw new ApiError('Amount too small to buy anything', 400);
+  const minBuy = (expected * BigInt(10_000 - slippageBps)) / BigInt(10_000);
 
-  const lossPercent = await quoteLoss(sell, BigInt(params.amount), buy, BigInt(best.toTokenAmount));
-  const warnings = await contractWarnings(vault, trade);
-  // The contract checks the same thing against signed prices, so such a trade only wastes gas.
-  if (lossPercent !== null && lossPercent * 100 > MAX_TRADE_LOSS_BPS) {
-    warnings.unshift(
-      `This route returns ${lossPercent.toFixed(1)}% less value than it sells; the vault rejects any trade losing over ${MAX_TRADE_LOSS_BPS / 100}%. Try a smaller amount or another stock.`,
-    );
+  const pool = poolPda();
+  const [sellProgram, buyProgram] = [programs.get(sell.toBase58())!, programs.get(buy.toBase58())!];
+  const route = await routerProgram(conn)
+    .methods.swap(new BN(amountIn.toString()), new BN(expected.toString()))
+    .accountsPartial({
+      user: vault,
+      userSrc: ata(vault, sell, sellProgram),
+      userDst: ata(vault, buy, buyProgram),
+      pool,
+      poolSrc: ata(pool, sell, sellProgram),
+      poolDst: ata(pool, buy, buyProgram),
+      srcMint: sell,
+      dstMint: buy,
+      srcTokenProgram: sellProgram,
+      dstTokenProgram: buyProgram,
+    })
+    .instruction();
+
+  const lossPercent = tradeLossPercent(
+    {amount: amountIn, decimals: sellInfo.decimals, priceUsd: Number(sellUsd)},
+    {amount: expected, decimals: buyInfo.decimals, priceUsd: Number(buyUsd)},
+  );
+
+  // Checks the program would fail on, as readable warnings.
+  const warnings: string[] = [];
+  const held = v.held.map((m) => m.toBase58());
+  const state = vaultStateName(v.state as Record<string, unknown>);
+  if (state !== 'Active') warnings.push(`The vault is ${state}; it can only trade while Active`);
+  if (v.planVersion.isZero()) warnings.push('The curator must post a plan (set_plan) before the first trade');
+  if (!registry.routers.some((r) => r.equals(ROUTER_PROGRAM_ID))) warnings.push('The router is not allowlisted in the registry');
+  if (buy.toBase58() !== usdc && !registry.assets.some((a) => a.equals(buy))) warnings.push(`${buyInfo.symbol} is not an approved asset`);
+  if (!held.includes(sell.toBase58())) warnings.push(`The vault does not hold ${sellInfo.symbol}`);
+  else {
+    const balance = await conn.getTokenAccountBalance(ata(vault, sell, sellProgram)).catch(() => null);
+    if (balance && BigInt(balance.value.amount) < amountIn) {
+      warnings.push(`The vault holds only ${balance.value.uiAmountString} ${sellInfo.symbol}`);
+    }
+  }
+  if (!held.includes(buy.toBase58()) && held.length >= MAX_ASSETS) {
+    warnings.push(`The vault already holds ${MAX_ASSETS} tokens; sell one out before buying another`);
+  }
+  if (lossPercent * 100 > MAX_TRADE_LOSS_BPS) {
+    warnings.push(`This route loses ${lossPercent.toFixed(2)}%, over the vault's 2% cap; the program will reject it`);
   }
 
   return {
-    trade,
-    quote: {
-      expectedBuyAmount: best.toTokenAmount,
-      slippagePercent: tx.slippagePercent,
-      route: best.dexRouterList.map((r) => `${r.dexProtocol.dexName} ${r.dexProtocol.percent}%`),
-      lossPercent,
+    trade: {
+      router: ROUTER_PROGRAM_ID.toBase58(),
+      sellMint: sell.toBase58(),
+      buyMint: buy.toBase58(),
+      maxSell: amountIn.toString(),
+      minBuy: minBuy.toString(),
+      routeData: Buffer.from(route.data).toString('base64'),
+      // The vault cannot sign the transaction; the program signs for it inside the CPI.
+      routeAccounts: route.keys.map((k) => ({
+        pubkey: k.pubkey.toBase58(),
+        isSigner: k.pubkey.equals(vault) ? false : k.isSigner,
+        isWritable: k.isWritable,
+      })),
     },
-    gasLimit: REBALANCE_GAS_LIMIT,
+    quote: {
+      expectedBuyAmount: expected.toString(),
+      slippagePercent: slippage,
+      route: [`${sellInfo.symbol} → ${buyInfo.symbol} (mock router, 0.3% fee)`],
+      lossPercent: Number.isFinite(lossPercent) ? lossPercent : null,
+    },
+    computeUnits: REBALANCE_COMPUTE_UNITS,
     warnings,
   };
-}
-
-/** The quote's loss at Binance's listed token prices; null when either side has no price. */
-async function quoteLoss(sell: Address, sold: bigint, buy: Address, bought: bigint): Promise<number | null> {
-  const listing = await getRwaTokens();
-  if (!listing.ok) return null;
-  const leg = (asset: Address, amount: bigint) => {
-    if (asset === getAddress(BSC_USDT)) return {amount, decimals: 18, priceUsd: 1};
-    const t = listing.data.find((r) => r.binanceChainId === '56' && r.tokenContractAddress.toLowerCase() === asset.toLowerCase());
-    const priceUsd = Number(t?.tokenPrice);
-    if (!t || !Number.isFinite(priceUsd) || priceUsd <= 0) return null;
-    return {amount, decimals: Number(t.decimals), priceUsd};
-  };
-  const s = leg(sell, sold);
-  const b = leg(buy, bought);
-  return s && b ? tradeLossPercent(s, b) : null;
-}
-
-/** What `rebalance` would reject, read from the chain so the curator sees it before signing. */
-async function contractWarnings(vault: Address, t: TradeRequest): Promise<string[]> {
-  const client = publicClient();
-  let registry: Address;
-  let held: readonly Address[];
-  let state: number;
-  let settlement: Address;
-  try {
-    [registry, held, state, settlement] = await Promise.all([
-      client.readContract({address: vault, abi: folioVaultAbi, functionName: 'registry'}),
-      client.readContract({address: vault, abi: folioVaultAbi, functionName: 'heldAssets'}),
-      client.readContract({address: vault, abi: folioVaultAbi, functionName: 'state'}),
-      client.readContract({address: vault, abi: folioVaultAbi, functionName: 'settlementToken'}),
-    ]);
-  } catch (error) {
-    return [isChainDown(error) ? 'Could not check the vault on-chain: the blockchain node is not responding' : `${vault} is not a Folio vault on the configured chain`];
-  }
-
-  const [routerOk, routerIsAsset, buyOk, planVersion, sellBalance, sellDecimals] = await Promise.all([
-    client.readContract({address: registry, abi: assetRegistryAbi, functionName: 'isRouter', args: [t.router]}),
-    client.readContract({address: registry, abi: assetRegistryAbi, functionName: 'isAsset', args: [t.router]}),
-    client.readContract({address: registry, abi: assetRegistryAbi, functionName: 'isAsset', args: [t.buyToken]}),
-    client.readContract({address: vault, abi: vaultPlanAbi, functionName: 'planVersion'}).catch(() => null),
-    client.readContract({address: t.sellToken, abi: erc20Abi, functionName: 'balanceOf', args: [vault]}),
-    client.readContract({address: t.sellToken, abi: erc20Abi, functionName: 'decimals'}),
-  ]);
-
-  const isHeld = (a: Address) => held.some((h) => getAddress(h) === a);
-  const warnings: string[] = [];
-  if (VAULT_STATES[state] !== 'ACTIVE') warnings.push(`The vault is ${VAULT_STATES[state] ?? state}; it can only trade while ACTIVE`);
-  if (planVersion === null) warnings.push('Could not read the vault’s plan; it may predate setPlan');
-  else if (planVersion === BigInt(0)) warnings.push('The curator must post a plan (setPlan) before the first trade');
-  if (!routerOk || routerIsAsset) warnings.push(`Router ${t.router} is not allowlisted in the registry`);
-  if (!buyOk) warnings.push(`Buy token ${t.buyToken} is not an approved asset`);
-  if (!isHeld(t.sellToken)) warnings.push(`The vault does not hold ${t.sellToken}`);
-  if (sellBalance < BigInt(t.maxSellAmount)) warnings.push(`The vault holds only ${sellBalance} of ${t.sellToken}`);
-  // A stock (never USDT) sold down to dust (FolioVault.DUST_DIVISOR) frees its slot before the
-  // buy token takes one.
-  const leftover = sellBalance - BigInt(t.maxSellAmount);
-  const dust = BigInt(10) ** BigInt(sellDecimals) / BigInt(1_000_000);
-  const freesSlot = leftover >= BigInt(0) && leftover <= dust && t.sellToken !== getAddress(settlement);
-  if (!isHeld(t.buyToken) && held.length - (freesSlot ? 1 : 0) >= MAX_ASSETS) {
-    warnings.push(`The vault already holds ${MAX_ASSETS} tokens; sell one out before buying another`);
-  }
-  return warnings;
 }

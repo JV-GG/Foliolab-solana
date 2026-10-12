@@ -1,7 +1,7 @@
 'use client';
 
 import {useEffect, useRef, useState} from 'react';
-import {formatUnits, type Address} from 'viem';
+import {formatUnits} from '@/lib/domain/format';
 import {money, tokenAmount} from '@/lib/domain/format';
 import {explainError, useDeposit, useRedeem, type DepositStep, type RedeemResult, type VaultView} from '@/lib/contracts/hooks';
 import type {TradeType} from './DetailPanel';
@@ -15,7 +15,7 @@ interface Props {
 
 const STEP_LABEL: Record<DepositStep, string> = {
   idle: 'Confirm investment',
-  approving: 'Approve USDT in your wallet…',
+  approving: 'Preparing…',
   pricing: 'Getting signed prices…',
   depositing: 'Confirm the deposit in your wallet…',
   done: 'Done',
@@ -31,7 +31,7 @@ export function TradeDialog({type, vault, onClose}: Props) {
   const [amount, setAmount] = useState('');
   const [percent, setPercent] = useState(100);
   const [previewState, setPreview] = useState<{key: string; result?: RedeemResult; error?: string} | null>(null);
-  const [forfeit, setForfeit] = useState<Address[]>([]);
+  const [forfeit, setForfeit] = useState<string[]>([]);
   const [showForfeit, setShowForfeit] = useState(false);
   const [error, setError] = useState('');
 
@@ -83,10 +83,10 @@ export function TradeDialog({type, vault, onClose}: Props) {
     try {
       if (type === 'invest') {
         const {shares} = await deposit(vault.address, amount);
-        notify(`Invested ${money(parsed)} · ${tokenAmount(shares, 18, 4)} shares received.`);
+        notify(`Invested ${money(parsed)} · ${tokenAmount(shares, 6, 4)} shares received.`);
       } else {
         await redeem(vault.address, redeemShares, forfeit);
-        notify(`Withdrew ${tokenAmount(redeemShares, 18, 4)} shares. Tokens sent to your wallet.`);
+        notify(`Withdrew ${tokenAmount(redeemShares, 6, 4)} shares. Tokens sent to your wallet.`);
       }
       onClose();
     } catch (err) {
@@ -106,7 +106,7 @@ export function TradeDialog({type, vault, onClose}: Props) {
         <div className="mb-6 flex items-start justify-between gap-3">
           <div>
             <p className="eyebrow mb-3">
-              {type === 'invest' ? 'INVEST USDT' : 'WITHDRAW YOUR SHARE'}
+              {type === 'invest' ? 'INVEST USDC' : 'WITHDRAW YOUR SHARE'}
             </p>
             <h2 className="font-editorial text-[31px] font-medium tracking-[-0.04em] text-[#2b3a30]">{vault.name}</h2>
           </div>
@@ -124,7 +124,7 @@ export function TradeDialog({type, vault, onClose}: Props) {
         {type === 'invest' ? (
           <>
             <label htmlFor="amount" className="mt-[17px] block text-[12px] font-semibold text-[#3d4a41]">
-              Amount in USDT
+              Amount in USDC
             </label>
             <input
               id="amount"
@@ -146,8 +146,8 @@ export function TradeDialog({type, vault, onClose}: Props) {
             </div>
             <p className="text-[12px] leading-[1.7] text-[#6b746c]">
               Shares are priced from live stock prices signed by the Folio server and checked by the vault.
-              Your USDT stays in the vault until the curator invests it. You will sign up to two
-              transactions: a USDT approval and the deposit.
+              Your USDC stays in the vault until the curator invests it. You sign one transaction;
+              it carries fresh signed prices so you buy in at a fair share price.
             </p>
           </>
         ) : (
@@ -170,7 +170,7 @@ export function TradeDialog({type, vault, onClose}: Props) {
               ))}
             </div>
             <div className="my-6 border-y border-[#cdd3ca] py-4">
-              <Row label="Shares to burn" value={tokenAmount(redeemShares, 18, 6)} />
+              <Row label="Shares to burn" value={tokenAmount(redeemShares, 6, 6)} />
               <p className="mb-1 mt-4 text-[12px] font-semibold text-[#3d4a41]">You receive in kind</p>
               {payout ? (
                 payout.assets.map((asset, i) => {
@@ -181,7 +181,7 @@ export function TradeDialog({type, vault, onClose}: Props) {
                   return (
                     <Row
                       key={asset}
-                      label={`${tokenAmount(payout.amounts[i], h?.decimals ?? 18, 4)} ${h?.symbol ?? asset}`}
+                      label={`${tokenAmount(payout.amounts[i], h?.decimals ?? 6, 4)} ${h?.symbol ?? asset}`}
                       value={usd}
                     />
                   );
@@ -227,7 +227,7 @@ export function TradeDialog({type, vault, onClose}: Props) {
             )}
             <p className="border-l-2 border-[#237b68] pl-4 text-[11px] leading-[1.7] text-[#59645c]">
               You get your exact share of every holding, in kind. That means stock tokens as well as
-              USDT. Selling those tokens is up to you. Withdrawals work even when the vault is paused.
+              USDC. Selling those tokens is up to you. Withdrawals work even when the vault is paused.
             </p>
           </>
         )}

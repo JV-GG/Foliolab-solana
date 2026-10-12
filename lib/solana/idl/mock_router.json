@@ -1,0 +1,83 @@
+{
+  "address": "FeE32TVg1Yk4DVe4jS3SELK13dQsbbDUWyY4dYKmQhjm",
+  "metadata": {
+    "name": "mock_router",
+    "version": "0.1.0",
+    "spec": "0.1.0"
+  },
+  "instructions": [
+    {
+      "name": "swap",
+      "discriminator": [
+        248,
+        198,
+        158,
+        145,
+        225,
+        117,
+        135,
+        200
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "signer": true
+        },
+        {
+          "name": "user_src",
+          "writable": true
+        },
+        {
+          "name": "user_dst",
+          "writable": true
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool_src",
+          "writable": true
+        },
+        {
+          "name": "pool_dst",
+          "writable": true
+        },
+        {
+          "name": "src_mint"
+        },
+        {
+          "name": "dst_mint"
+        },
+        {
+          "name": "src_token_program"
+        },
+        {
+          "name": "dst_token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount_in",
+          "type": "u64"
+        },
+        {
+          "name": "amount_out",
+          "type": "u64"
+        }
+      ]
+    }
+  ]
+}

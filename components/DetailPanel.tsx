@@ -59,14 +59,14 @@ export function DetailPanel({vault, connected, onTrade}: Props) {
           <SectionTitle eyebrow="Connected wallet">Your position</SectionTitle>
           {!connected ? <EmptyLine>Connect a wallet to load your shares and territory.</EmptyLine> : vault.position === null ? <EmptyLine>Position data is unavailable for this wallet.</EmptyLine> : (
             <dl className="mt-7 grid grid-cols-2 gap-x-6 gap-y-8 border-y border-[#cdd3ca] py-7">
-              <Metric label="Shares" value={tokenAmount(vault.position.shares, 18, 6)} />
+              <Metric label="Shares" value={tokenAmount(vault.position.shares, 6, 6)} />
               <Metric label="Vault share" value={sharePercent === null ? 'Unavailable' : `${formatPercent(sharePercent)}%`} />
               <div className="col-span-2"><Metric label="Estimated position" value={vault.position.valueUsd === null ? 'Unavailable' : money(Number(vault.position.valueUsd))} /></div>
             </dl>
           )}
-          <p className="mt-6 text-[12px] leading-6 text-[#5d6960]">Withdrawals return your proportional share of every held token in kind—including stock tokens and USDT—not a guaranteed cash amount.</p>
+          <p className="mt-6 text-[12px] leading-6 text-[#5d6960]">Withdrawals return your proportional share of every held token in kind—including stock tokens and USDC—not a guaranteed cash amount.</p>
           <div className="mt-8 grid gap-3">
-            <button type="button" disabled={!connected || !acceptsDeposits} onClick={() => onTrade('invest')} className="folio-button-primary w-full">{!connected ? 'Connect wallet to deposit' : acceptsDeposits ? 'Deposit USDT' : pricesMissing && vault.state === 'ACTIVE' ? 'Deposit unavailable: missing prices' : `Deposits closed · ${vault.state}`}</button>
+            <button type="button" disabled={!connected || !acceptsDeposits} onClick={() => onTrade('invest')} className="folio-button-primary w-full">{!connected ? 'Connect wallet to deposit' : acceptsDeposits ? 'Deposit USDC' : pricesMissing && vault.state === 'ACTIVE' ? 'Deposit unavailable: missing prices' : `Deposits closed · ${vault.state}`}</button>
             <button type="button" disabled={!hasShares} onClick={() => onTrade('withdraw')} className="folio-button-secondary w-full">{hasShares ? 'Withdraw in kind' : 'No shares to withdraw'}</button>
           </div>
         </aside>

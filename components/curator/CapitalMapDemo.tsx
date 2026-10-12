@@ -1,31 +1,32 @@
 'use client';
 
 import Link from 'next/link';
-import type {Address} from 'viem';
 import type {VaultView} from '@/lib/contracts/hooks';
 import {AssetMap} from './AssetMap';
 import type {MapHolder} from './useIslandOverlay';
 
-const DEMO_VAULT_ADDRESS = '0x1111111111111111111111111111111111111111' as Address;
+const DEMO_VAULT_ADDRESS = '0x1111111111111111111111111111111111111111' as string;
 
 const DEMO_VAULT: VaultView = {
   address: DEMO_VAULT_ADDRESS,
   name: 'Visual Demo Vault',
   symbol: 'DEMO',
-  manager: '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' as Address,
+  manager: '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' as string,
   state: 'ACTIVE',
+  index: 0,
+  shareDecimals: 6,
   totalSupply: '100000000000000000000',
   holdings: [
     {
-      asset: '0x55d398326f99059fF775485246999027B3197955' as Address,
-      symbol: 'USDT',
+      asset: '0x55d398326f99059fF775485246999027B3197955' as string,
+      symbol: 'USDC',
       decimals: 18,
       amount: '40000000000000000000',
       priceUsd: '1',
       valueUsd: '40',
     },
     {
-      asset: '0x390a684ef9cade28a7ad0dfa61ab1eb3842618c4' as Address,
+      asset: '0x390a684ef9cade28a7ad0dfa61ab1eb3842618c4' as string,
       symbol: 'AAPLon',
       decimals: 18,
       amount: '1000000000000000000',
@@ -33,7 +34,7 @@ const DEMO_VAULT: VaultView = {
       valueUsd: '35',
     },
     {
-      asset: '0xa9ee28c80f960b889dfbd1902055218cba016f75' as Address,
+      asset: '0xa9ee28c80f960b889dfbd1902055218cba016f75' as string,
       symbol: 'NVDAon',
       decimals: 18,
       amount: '1000000000000000000',
@@ -96,7 +97,7 @@ export function CapitalMapDemo() {
           <p className="mt-2 break-words text-[11px] leading-[1.6] text-[#8fa1b8]">Static, isolated display data. It does not call an API, connect a wallet or send a transaction.</p>
 
           <DemoSection title="Asset colors">
-            <DemoRow color="#55d7c2" label="USDT" value="40%" />
+            <DemoRow color="#55d7c2" label="USDC" value="40%" />
             <DemoRow color="#a985ef" label="AAPLon" value="35%" />
             <DemoRow color="#f1c85b" label="NVDAon" value="25%" />
           </DemoSection>
@@ -118,7 +119,7 @@ export function CapitalMapDemo() {
             demo
             vaults={[DEMO_VAULT]}
             selectedAddress={DEMO_VAULT_ADDRESS}
-            connectedAddress={DEMO_HOLDERS[0].address as Address}
+            connectedAddress={DEMO_HOLDERS[0].address as string}
             holdersByVault={{[DEMO_VAULT_ADDRESS.toLowerCase()]: DEMO_HOLDERS}}
             onSelect={() => undefined}
           />

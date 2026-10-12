@@ -1,13 +1,11 @@
 'use client';
 
 import {useMemo, useState} from 'react';
-import type {Address} from 'viem';
-import {useChainId, useConnection} from 'wagmi';
+import {useConnection} from '@/lib/contracts/wallet';
 import {AnimatedBrandFooter} from '@/components/AnimatedBrandFooter';
 import {Header} from '@/components/Header';
 import {useVaults, type VaultView} from '@/lib/contracts/hooks';
-import {deploymentFor} from '@/lib/contracts/addresses';
-import {appChainLabel} from '@/lib/contracts/wagmi';
+import {appChainLabel} from '@/lib/contracts/wallet';
 import {shortAddress} from '@/lib/domain/format';
 import {ActivityPanel, ActivityStrip} from './ActivityPanel';
 import {AssetMap} from './AssetMap';
@@ -24,10 +22,9 @@ type MobileView = 'controls' | 'map';
 
 export function CuratorConsole({artSample = false}: {artSample?: boolean} = {}) {
   const {address, isConnected} = useConnection();
-  const chainId = useChainId();
   const {data: vaults = [], isLoading, error, refetch, isFetching} = useVaults();
   const {action, createAndSeed, seedExistingVault, activateVault} = useCuratorActions();
-  const [selectedAddress, setSelectedAddress] = useState<Address | null>(null);
+  const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
   const [managerTab, setManagerTab] = useState<ManagerTab>('plan');
   const [mobileView, setMobileView] = useState<MobileView>('map');
   const [createOpen, setCreateOpen] = useState(false);
@@ -94,20 +91,20 @@ export function CuratorConsole({artSample = false}: {artSample?: boolean} = {}) 
       <AnimatedBrandFooter />
 
       <CuratorModal open={createOpen} title="Create and seed a vault" onClose={() => setCreateOpen(false)}>
-        <CreateVaultCard connected={isConnected} deploymentReady={Boolean(deploymentFor(chainId))} action={action} onCreate={createAndSeed} onCreated={(vault) => { setSelectedAddress(vault); setCreateOpen(false); setMobileView('controls'); void refetch(); }} />
+        <CreateVaultCard connected={isConnected} deploymentReady action={action} onCreate={createAndSeed} onCreated={(vault) => { setSelectedAddress(vault); setCreateOpen(false); setMobileView('controls'); void refetch(); }} />
       </CuratorModal>
     </div>
   );
 }
 
-interface VaultPickerProps { connected: boolean; managed: VaultView[]; selected: VaultView | null; loading: boolean; refreshing: boolean; error: string | null; onSelect: (address: Address) => void; onRefresh: () => void; }
+interface VaultPickerProps { connected: boolean; managed: VaultView[]; selected: VaultView | null; loading: boolean; refreshing: boolean; error: string | null; onSelect: (address: string) => void; onRefresh: () => void; }
 
 function VaultPicker({connected, managed, selected, loading, refreshing, error, onSelect, onRefresh}: VaultPickerProps) {
   const message = !connected ? 'Connect manager wallet' : error ? `Vault API unavailable: ${error}` : loading ? 'Loading managed vaults…' : managed.length === 0 ? 'No vaults managed by this wallet' : null;
   return (
     <div>
       <div className="mb-2 flex items-center justify-between"><span className="eyebrow">Managed vault</span><button type="button" onClick={onRefresh} disabled={refreshing} className="folio-button-quiet min-h-0 px-2 py-1 text-[10px]">{refreshing ? 'Refreshing…' : 'Refresh'}</button></div>
-      {message ? <p className={`border-b border-[#cdd3ca] py-3 text-[11px] ${error ? 'text-[#a14343]' : 'text-[#6b746c]'}`} title={message}>{message}</p> : <select aria-label="Selected managed vault" value={selected?.address ?? ''} onChange={(event) => onSelect(event.target.value as Address)} className="folio-field text-[12px] font-semibold">{managed.map((vault) => <option key={vault.address} value={vault.address}>{vault.name} ({vault.symbol})</option>)}</select>}
+      {message ? <p className={`border-b border-[#cdd3ca] py-3 text-[11px] ${error ? 'text-[#a14343]' : 'text-[#6b746c]'}`} title={message}>{message}</p> : <select aria-label="Selected managed vault" value={selected?.address ?? ''} onChange={(event) => onSelect(event.target.value as string)} className="folio-field text-[12px] font-semibold">{managed.map((vault) => <option key={vault.address} value={vault.address}>{vault.name} ({vault.symbol})</option>)}</select>}
     </div>
   );
 }
@@ -148,7 +145,7 @@ function VaultStatus({
         <div className="mt-4 border-l-2 border-[#b18b15] pl-3 text-[11px] leading-5 text-[#6f5c0d]">
           <strong className="block text-[#171c18]">Vault in DRAFT — Initial Seed Required</strong>
           <p className="mt-1 text-[#717b72]">
-            This vault is deployed on-chain but needs an initial seed deposit (min 10 USDT) to become active.
+            This vault is deployed on-chain but needs an initial seed deposit (min 10 USDC) to become active.
           </p>
           <button
             type="button"
@@ -156,7 +153,7 @@ function VaultStatus({
             disabled={busy}
             className="folio-button-primary mt-2 min-h-0 px-3 py-1 text-[11px]"
           >
-            {action === 'approving' ? 'Approving USDT…' : action === 'seeding' ? 'Seeding Vault…' : 'Deposit 10 USDT Seed →'}
+            {action === 'approving' ? 'Preparing…' : action === 'seeding' ? 'Seeding Vault…' : 'Deposit 10 USDC Seed →'}
           </button>
         </div>
       )}

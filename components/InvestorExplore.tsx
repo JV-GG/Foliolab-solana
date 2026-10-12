@@ -2,11 +2,11 @@
 
 import {useState} from 'react';
 import Link from 'next/link';
-import {useConnection} from 'wagmi';
+import {useConnection} from '@/lib/contracts/wallet';
 import {AssetMap} from '@/components/curator/AssetMap';
 import {money, shortAddress} from '@/lib/domain/format';
 import {useVaults, type VaultView} from '@/lib/contracts/hooks';
-import {appChainLabel} from '@/lib/contracts/wagmi';
+import {appChainLabel} from '@/lib/contracts/wallet';
 import {Header} from './Header';
 import {AnimatedBrandFooter} from './AnimatedBrandFooter';
 import {StrategyCard} from './StrategyCard';

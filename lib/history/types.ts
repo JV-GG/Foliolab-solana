@@ -1,4 +1,6 @@
-import type {Address, Hex} from 'viem';
+/** Addresses are base58 Solana keys; `txHash` is the transaction signature; `blockNumber` is the slot. */
+type Address = string;
+type Hex = string;
 
 export type ActivityType = 'deposit' | 'redeem' | 'rebalance' | 'plan' | 'seed';
 

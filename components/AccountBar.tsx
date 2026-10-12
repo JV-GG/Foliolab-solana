@@ -1,65 +1,45 @@
 'use client';
 
-import {formatUnits, parseUnits} from 'viem';
-import {useConfig, useConnection, useReadContract} from 'wagmi';
-import {writeContract} from 'wagmi/actions';
+import {Transaction} from '@solana/web3.js';
 import {money} from '@/lib/domain/format';
-import {erc20Abi} from '@/lib/contracts/abis';
-import {deploymentFor} from '@/lib/contracts/addresses';
-import {waitForSuccessfulReceipt, type VaultView} from '@/lib/contracts/hooks';
-import {appChain, appChainLabel} from '@/lib/contracts/wagmi';
+import {useTokenBalance, type VaultView} from '@/lib/contracts/hooks';
+import {appChainLabel, isTestCluster, useConnection, useSendTransaction} from '@/lib/contracts/wallet';
+import {deployment} from '@/lib/solana/config';
 import {useNotify} from './Toast';
-
-/** Open-mint function on the local mock USDT. Exists only on the dev chain. */
-const mintAbi = [
-  {
-    type: 'function',
-    name: 'mint',
-    inputs: [{type: 'address'}, {type: 'uint256'}],
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-] as const;
-
-const isLocal = appChain.id === 31337;
 
 export function AccountBar({vaults}: {vaults: VaultView[]}) {
   const {address} = useConnection();
-  const config = useConfig();
   const notify = useNotify();
-  const usdt = deploymentFor(appChain.id)?.usdt;
+  const send = useSendTransaction();
+  const usdc = isTestCluster ? deployment().usdc : undefined;
+  const balance = useTokenBalance(usdc);
 
-  const balance = useReadContract({
-    address: usdt,
-    abi: erc20Abi,
-    functionName: 'balanceOf',
-    args: address ? [address] : undefined,
-    query: {enabled: Boolean(address && usdt), refetchInterval: 10_000},
-  });
-
-  const cash = balance.data === undefined ? null : Number(formatUnits(balance.data, 18));
+  const cash = balance.data === undefined ? null : Number(balance.data) / 1e6;
   const positions = vaults.filter((vault) => vault.position && vault.position.shares !== '0');
   const invested = positions.every((vault) => vault.position?.valueUsd !== null)
     ? positions.reduce((sum, vault) => sum + Number(vault.position!.valueUsd), 0)
     : null;
   const total = cash !== null && invested !== null ? cash + invested : null;
 
+  /** The server signs a mint of mock USDC as its authority; the wallet pays the fee and sends it. */
   async function faucet() {
-    if (!address || !usdt) return;
+    if (!address) return;
     try {
-      const hash = await writeContract(config, {address: usdt, abi: mintAbi, functionName: 'mint', args: [address, parseUnits('1000', 18)]});
-      await waitForSuccessfulReceipt(config, hash);
+      const res = await fetch('/api/faucet', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({account: address})});
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? 'Faucet unavailable');
+      await send(Transaction.from(Buffer.from(body.transaction, 'base64')));
       await balance.refetch();
-      notify('1,000 test USDT added to your wallet.');
-    } catch {
-      notify('Could not mint test USDT.');
+      notify('1,000 test USDC added to your wallet.');
+    } catch (error) {
+      notify(`Could not get test USDC. ${(error as Error).message ?? ''}`);
     }
   }
 
   const show = (value: number | null) => (!address ? '—' : value === null ? 'Unavailable' : money(value));
   const cells = [
     {label: 'Wallet total', value: show(total)},
-    {label: 'USDT available', value: show(cash)},
+    {label: 'USDC available', value: show(cash)},
     {label: 'Invested', value: show(invested)},
     {label: 'Positions', value: address ? String(positions.length) : '—'},
   ];
@@ -78,9 +58,9 @@ export function AccountBar({vaults}: {vaults: VaultView[]}) {
           <span className="block text-[9px] font-bold tracking-[0.11em] text-[#7a837b]">NETWORK</span>
           <strong className="mt-2 block text-[12px] text-[#3d4a41]">{appChainLabel}</strong>
         </div>
-        {isLocal && (
+        {isTestCluster && (
           <button type="button" disabled={!address} onClick={faucet} className="folio-button-secondary min-h-0 shrink-0 px-2.5 py-2 text-[9px]">
-            + Test USDT
+            + Test USDC
           </button>
         )}
       </div>

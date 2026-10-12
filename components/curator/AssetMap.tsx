@@ -8,7 +8,6 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import type {Address} from 'viem';
 import type {VaultView} from '@/lib/contracts/hooks';
 import {shortAddress, tokenAmount} from '@/lib/domain/format';
 import crescentIsland from './art/vault-island-art-crescent.png';
@@ -37,12 +36,12 @@ const desktopServerSnapshot = () => false;
 
 interface Props {
   vaults: VaultView[];
-  selectedAddress: Address | null;
-  connectedAddress?: Address;
+  selectedAddress: string | null;
+  connectedAddress?: string;
   artSample?: boolean;
   demo?: boolean;
   holdersByVault?: Record<string, MapHolder[]>;
-  onSelect: (address: Address) => void;
+  onSelect: (address: string) => void;
 }
 
 interface Pan {
@@ -109,7 +108,7 @@ export function AssetMap({
     setPan({x: 0, y: 0});
   }
 
-  function selectVault(address: Address) {
+  function selectVault(address: string) {
     setTerritoryDetail(null);
     onSelect(address);
   }
@@ -289,7 +288,7 @@ function ArtVaultIsland({
   imageUrl: string;
   maskUrl: string;
   selected: boolean;
-  connectedAddress?: Address;
+  connectedAddress?: string;
   holdersOverride?: MapHolder[];
   showAssets: boolean;
   showTerritories: boolean;
@@ -445,7 +444,7 @@ function TerritoryDetailCard({detail, onClose}: {detail: TerritoryDetail; onClos
         <button type="button" onClick={onClose} className="grid h-6 w-6 shrink-0 place-items-center border border-[#555b58] text-[12px] text-[#aeb4b0] hover:border-[#e6e8e3] hover:text-white">×</button>
       </div>
       <dl className="mt-3 grid grid-cols-2 gap-2 font-mono text-[9px]">
-        <div><dt className="text-[#6f849e]">Shares</dt><dd className="mt-1 text-[#dce6f1]">{tokenAmount(detail.holder.shares, 18, 6)}</dd></div>
+        <div><dt className="text-[#6f849e]">Shares</dt><dd className="mt-1 text-[#dce6f1]">{tokenAmount(detail.holder.shares, 6, 6)}</dd></div>
         <div><dt className="text-[#6f849e]">Vault share</dt><dd className="mt-1 text-[#dce6f1]">{percent === null ? 'Unavailable' : `${formatPercent(percent)}%`}</dd></div>
         <div className="col-span-2"><dt className="text-[#6f849e]">Estimated position value</dt><dd className="mt-1 text-[#dce6f1]">{detail.holder.valueUsd === null ? 'Valuation unavailable' : `$${Number(detail.holder.valueUsd).toLocaleString('en-US', {maximumFractionDigits: 2})}`}</dd></div>
       </dl>
@@ -485,7 +484,7 @@ function MapLegend({vault, mapView, showTerritories, demo}: {vault: VaultView | 
   );
 }
 
-function realHolders(vault: VaultView, connectedAddress?: Address): MapHolder[] {
+function realHolders(vault: VaultView, connectedAddress?: string): MapHolder[] {
   const total = BigInt(vault.totalSupply);
   if (total <= BigInt(0)) return [];
   const requestedShares = vault.position === null ? BigInt(0) : BigInt(vault.position.shares);

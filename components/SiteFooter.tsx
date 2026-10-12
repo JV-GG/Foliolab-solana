@@ -12,7 +12,7 @@ export function SiteFooter() {
           <Link href="/explore">Explore</Link><span aria-hidden="true">•</span>
           <Link href="/portfolio">Portfolio</Link><span aria-hidden="true">•</span>
           <Link href="/curator">Curator</Link><span aria-hidden="true">•</span>
-          <a href="https://www.bnbchain.org" target="_blank" rel="noreferrer">BNB Chain</a>
+          <a href="https://solana.com" target="_blank" rel="noreferrer">Solana</a>
         </nav>
         <p className="mt-8 text-[10px] tracking-[0.08em] text-[#7b847c]">© 2026 Folio Lab · Tokenized portfolios, held transparently.</p>
       </div>

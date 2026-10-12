@@ -1,6 +1,6 @@
 # Folio Lab → Solana: port status and handoff
 
-Last updated: 11 Oct 2026. Read this whole file before changing code. If you are an AI agent, treat
+Last updated: 12 Oct 2026. Read this whole file before changing code. If you are an AI agent, treat
 it as your brief: the facts, interfaces and gotchas here are verified, and the "To do" tasks are
 written so you can pick one and do it.
 
@@ -12,8 +12,8 @@ written so you can pick one and do it.
   always withdraw their percentage of every holding (even when paused); deposits never dilute holders;
   each trade loses at most 2% against signed prices.
 - It was first built for the **BNB Chain** hackathon (Solidity + Next.js) in the `bnb-hack` repo.
-- This repo (`Foliolab-solana`) is the **Solana port** for a Solana-track hackathon. **Deadline: today
-  (11 Oct 2026).**
+- This repo (`Foliolab-solana`) is the **Solana port** for a Solana-track hackathon. The deadline was
+  given as 11 Oct 2026; confirm the exact submission time with the team.
 - Decisions taken:
   - Run on **devnet** with **mock stock tokens** and a **mock swap program** (`mock_router`). The
     real stock tokens (e.g. xStocks) and Jupiter liquidity exist only on mainnet.
@@ -21,122 +21,98 @@ written so you can pick one and do it.
   - Next.js app stays at the repo root; the Solana programs live in `anchor/`.
   - Stablecoin is **USDC** (6 decimals), not USDT.
 
+## Status at a glance (12 Oct 2026)
+
+- ✅ **Built and working locally:** Solana program, setup script, backend API, investor UI, curator UI.
+  Proven end to end on a local validator (faucet → deposit → rebalance → withdraw).
+- ⚠️ **Not committed yet.** All of the backend/frontend port is still uncommitted on Jun Voon's Mac.
+  Until it is pushed, teammates pulling the repo will still see the old BNB backend and frontend.
+- ❌ **Not on devnet yet.** The deploy wallet has 0 SOL (the CLI faucet is rate-limited).
+- ❌ **Not on Vercel, no demo video, no DX report.**
+
 ## 2. Done ✅
 
 | What | Where |
 |---|---|
-| Next.js app copied from `bnb-hack` (no `.env`, no Solidity, no `prototype/`) | repo root |
-| Anchor workspace (Anchor **1.2.1**) | `anchor/` |
-| `folio_vault` program: all BNB contract features ported | `anchor/programs/folio_vault/src/` |
-| `mock_router` program (Jupiter stand-in) | `anchor/programs/mock_router/src/lib.rs` |
-| 11 LiteSVM tests, **all passing**: full flow, sell to dust, minimum seed, wrong signer, stale prices, missing price, pause blocks deposit and trade but not redeem, >2% loss refused, plan and manager required, unlisted asset or router refused, over-redeem refused | `anchor/programs/folio_vault/tests/test_vault.rs` |
-| IDL generated | `anchor/target/idl/folio_vault.json`, `mock_router.json` |
-| Program README (mapping, price message, remaining_accounts) | `anchor/README.md` |
-| Root `README.md` rewritten for Solana (with honest status) | `README.md` |
-| `.env.example` rewritten with Solana variables and how to fill each | `.env.example` |
-| Toolchain installed on Jun Voon's Mac (see §6) | — |
+| Anchor workspace (Anchor **1.2.1**): `folio_vault` (all BNB features) + `mock_router` (Jupiter stand-in) | `anchor/` |
+| 11 LiteSVM program tests, **all passing** | `anchor/programs/folio_vault/tests/test_vault.rs` |
+| Shared TS client: IDLs, PDAs, token accounts, price message, Ed25519 instruction | `lib/solana/program.ts`, `lib/solana/idl/` |
+| Cluster config + address book (written by the setup script) | `lib/solana/config.ts`, `lib/solana/addresses.json` |
+| **Setup script**: mock USDC/AAPLx/NVDAx/TSLAx mints, registry, allowlist, guardian, router pool, demo vault (seeded, active, plan, one AAPLx buy). Idempotent. | `scripts/setup-solana.ts` (`npm run setup:solana`) |
+| **Backend on Solana** (no viem): `/api/prices` (ed25519), `/api/trade` (mock router route), `/api/vaults`, `/api/vaults/<v>`, `/api/history` (Anchor events), `/api/vaults/<v>/activate` (demo guardian), **new** `/api/faucet` (1,000 test USDC) | `app/api/**`, `lib/{chain,pricing,trade,vaults,history}` |
+| **Frontend on Solana** (no wagmi): wallet adapter (Phantom/Solflare/Backpack via Wallet Standard), deposit, withdraw, faucet button, curator create+seed (one tx), plan, rebalance, activate, Solana Explorer links, USDC wording | `app/providers.tsx`, `lib/contracts/{wallet,hooks}.ts`, `components/**` |
+| **End-to-end smoke test** through the API: faucet → deposit → rebalance → redeem. **Passes on localnet.** | `scripts/smoke-solana.ts` (`npm run smoke:solana`) |
+| 29 unit tests pass (`npm test`); `next build` passes | — |
+| Local dev chain: `npm run validator` (programs preloaded) | `package.json` |
 
-Program IDs (from `anchor/target/deploy/*-keypair.json`, **not deployed yet**):
-- `folio_vault`: `9PY9RRXQuMtHXDyvWNL5ohFrsSux5SLrJhhdtuBgLUJH`
-- `mock_router`: `FeE32TVg1Yk4DVe4jS3SELK13dQsbbDUWyY4dYKmQhjm`
+Program IDs: `folio_vault` `9PY9RRXQuMtHXDyvWNL5ohFrsSux5SLrJhhdtuBgLUJH`, `mock_router`
+`FeE32TVg1Yk4DVe4jS3SELK13dQsbbDUWyY4dYKmQhjm`. The program keypairs in `anchor/target/deploy/` (git-ignored)
+decide these; whoever deploys needs those two files.
 
-> The keypair files in `anchor/target/deploy/` decide those IDs. `target/` is git-ignored, so **copy
-> those two keypair files to whoever deploys**, or run `anchor keys sync` on a fresh machine and update
-> every place the IDs appear.
+Keys on Jun Voon's Mac (outside the repo, never commit): deploy wallet `~/.config/solana/id.json`
+(`63aD1FYX2TWAF4HR3wyrRhJsnvK7vJ9FwGhLFg2St7YR`), `~/folio-price-signer.json`, `~/folio-guardian.json`,
+`~/folio-faucet.json`.
 
 ## 3. Not done ❌
 
 | Area | State |
 |---|---|
-| Devnet deployment | Not deployed. No wallet on the machine yet (`~/.config/solana/id.json` missing). |
-| Devnet setup script (mock USDC/AAPL/NVDA mints, registry init, allowlist, router pool) | Not written |
-| Backend (`app/api/**`, `lib/pricing`, `lib/trade`, `lib/vaults`, `lib/chain`, `lib/history`) | Still EVM (viem). Reads BSC. |
-| Frontend wallet and hooks (`lib/contracts/**`, `app/providers.tsx`, components) | Still wagmi/viem. |
-| Root `AGENTS.md` / `CLAUDE.md` | Still describe the BNB project. Update them, or agents will be misled. |
-| Malicious-router test (router tries to drain or approve a delegate) | Not written. The checks exist in code. |
-| Real Jupiter swap (mainnet) | Not attempted. |
-| Vercel deploy, demo video, developer-experience report | Not started. **The DX report must be written by the team, not by AI.** |
+| **Devnet deployment** | Blocked on devnet SOL: the CLI faucet is rate-limited. Fund `63aD1FYX2TWAF4HR3wyrRhJsnvK7vJ9FwGhLFg2St7YR` with ~5 SOL at https://faucet.solana.com, then do Task 1. |
+| **Commit and push** | Not done: ~59 changed files on Jun Voon's Mac. |
+| Click-through test in a real browser wallet | Not done (the API + program flow is proven by the smoke test; the React screens compile and render). |
+| Live Binance prices | Untested on Solana: local runs used `PRICE_SOURCE=static`. Mock tokens are priced from the underlying ticker (AAPLx → AAPL) via the Binance RWA listing; if the market is closed, signing is refused unless `PRICE_REQUIRE_OPEN_MARKET=false` or `PRICE_SOURCE=static`. |
+| Vercel deploy | Not done (needs the devnet deploy first). |
+| Root `AGENTS.md` / `CLAUDE.md` | Still describe the BNB project. |
+| Malicious-router test | Not written. The checks exist in code. |
+| Real Jupiter swap (mainnet) | Not attempted. `/api/trade` returns 501 on mainnet. |
+| Demo video, developer-experience report | Not started. **The DX report must be written by the team, not by AI.** |
 
 ## 4. To do, in priority order
 
-Each task lists the files it touches. Tasks 2–4 can run in parallel once task 1 has produced
-addresses.
+### Task 1 — Deploy to devnet (once the wallet has SOL)
+```sh
+export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.local/share/agave/solana-release/bin:$PATH"
+cd anchor && anchor build --arch v0 && anchor deploy --provider.cluster devnet && cd ..
+npm run idl                                 # only if the program changed
+CLUSTER=devnet npm run setup:solana         # writes lib/solana/addresses.json [devnet]
+```
+Then commit `lib/solana/addresses.json`.
 
-### Task 1 — Deploy to devnet (blocks everything else)
-1. Create a deploy wallet: `solana-keygen new -o ~/.config/solana/id.json`, then
-   `solana config set --url devnet` and `solana airdrop 2` (repeat, or use https://faucet.solana.com).
-   Deploying both programs needs roughly 3–4 SOL.
-2. Copy the two program keypairs into `anchor/target/deploy/`, then
-   `cd anchor && anchor build --arch v0 && anchor deploy --provider.cluster devnet`.
-3. Write `anchor/scripts/setup-devnet.ts` (TypeScript, `@solana/web3.js` +
-   `@coral-xyz/anchor` style client using the IDL, or `@solana/kit` + Codama). It must:
-   - create mock mints: USDC (6 decimals, legacy SPL Token), AAPLx (8 decimals, **Token-2022**) and
-     NVDAx (8 decimals, legacy) — mirror the test setup;
-   - `initialize_registry(guardian, price_signer)`, where `price_signer` is the public key of
-     `PRICE_SIGNER_SECRET_KEY`;
-   - `set_asset` for each stock mint, `set_router(mock_router id)`;
-   - fund the router pool: ATAs owned by PDA `["pool"]` of `mock_router`, for every mint, with
-     a large balance;
-   - optionally create one demo vault, seed it with 100 USDC, activate it, and post a plan;
-   - print every address as JSON → save to `lib/contracts/addresses.devnet.json`.
-4. Put the USDC mint into `.env.local` / Vercel as `NEXT_PUBLIC_USDC_MINT`.
+### Task 2 — Run it locally and click through (anyone)
+On a fresh machine you need your own keys first (the setup script makes the guardian and faucet keys if
+missing, but not these two), and the `.so` files from `anchor build`:
+```sh
+solana-keygen new --no-bip39-passphrase -o ~/.config/solana/id.json     # skip if you already have one
+solana-keygen new --no-bip39-passphrase -o ~/folio-price-signer.json
+(cd anchor && anchor build --arch v0)
+```
+Your local addresses will differ from the ones in `lib/solana/addresses.json` [localnet]; the script
+overwrites that entry, so don't commit your localnet changes.
+```sh
+npm install
+npm run validator                            # terminal 1 (needs the .so files from anchor build)
+solana -u localhost airdrop 100              # terminal 2
+CLUSTER=localnet npm run setup:solana
+# .env.local: NEXT_PUBLIC_SOLANA_CLUSTER=localnet, *_RPC_URL=http://127.0.0.1:8899, PRICE_SOURCE=static,
+#             PRICE_SIGNER_SECRET_KEY / GUARDIAN_SECRET_KEY / FAUCET_SECRET_KEY from the ~/folio-*.json files
+npm run dev
+APP_URL=http://localhost:3000 CLUSTER=localnet npm run smoke:solana   # optional API check
+```
+In Phantom: Settings → Developer settings → enable testnet mode and add a custom RPC
+`http://127.0.0.1:8899` (or use devnet once deployed). Get SOL with `solana -u localhost airdrop 5 <address>`, then
+**+ Test USDC** on the investor page, deposit, withdraw; on `/curator` create a vault, post a plan, rebalance.
+Fix any UI bug you hit.
 
-### Task 2 — Backend (Part 2): replace viem with Solana
-Files: `lib/chain/server.ts`, `lib/pricing/signer.ts`, `lib/trade/build.ts`, `lib/vaults/read.ts`,
-`lib/history/*`, `app/api/**`. Keep `lib/binance/**` and `lib/pricing/rules.ts` (pure, chain-agnostic).
+### Task 3 — Vercel (Part 4)
+Set env vars from `.env.example` with `NEXT_PUBLIC_SOLANA_CLUSTER=devnet`, a devnet RPC (Helius free tier
+recommended), the three secret keys, Binance keys, `PRICE_SOURCE=binance` (or `static` if the US market is
+closed during judging and Binance refuses to sign). Deploy, then put the URL and demo tx links in `README.md`.
 
-- `lib/chain/server.ts`: a Solana `Connection` / `createSolanaRpc` from `SOLANA_RPC_URL`.
-- `lib/pricing/signer.ts`: read the vault account (Anchor IDL decode) → `held` mints; get prices
-  (Binance as now); build the **exact message in §5.2**; sign with ed25519 (`tweetnacl` or
-  `@noble/ed25519`) using `PRICE_SIGNER_SECRET_KEY` (a JSON array of 64 numbers). Response:
-  `{ update: { mints: string[], prices: string[], timestamp: string }, message: base64,
-  signature: base64, signer: base58, expiresAt }`. On devnet the mock mints have no Binance listing:
-  keep a map `mock mint → real symbol` (AAPLx→AAPL, NVDAx→NVDA) and price them from the underlying.
-- `lib/trade/build.ts` (`/api/trade`): on devnet, return the **mock_router `swap` instruction**
-  (`amount_in`, `amount_out = amount_in × price_sell / price_buy × 0.997`, adjusted for decimals) and
-  its account list (§5.3), with the vault as `user`, **not signer**. On mainnet (later): Jupiter
-  `/swap-instructions` with `userPublicKey = vault PDA`.
-- `lib/vaults/read.ts` (`/api/vaults`): list vaults with `getProgramAccounts` filtered by the `Vault`
-  discriminator, or derive PDAs `0..registry.vault_count`. Holdings = balances of the vault's ATAs for
-  each `held` mint.
-- `lib/history`: rebuild from program logs/events (`Deposited`, `Redeemed`, `Rebalanced`,
-  `PlanPosted`) via `getSignaturesForAddress(vault)`. Lowest priority; stub it if short on time.
-- `app/api/vaults/[address]/activate`: dev-only guardian helper; port it or delete it.
+### Task 4 — Submission
+Demo video; developer-experience report (team-written); update `AGENTS.md`.
 
-### Task 3 — Investor frontend (Part 3)
-Files: `app/providers.tsx`, `lib/contracts/**`, `components/WalletButton.tsx`, `AccountBar.tsx`,
-`TradeDialog.tsx`, `VaultDetailsPage.tsx`, `InvestorExplore.tsx`, `PortfolioDashboard.tsx`,
-`ActivityFeed.tsx`, `lib/history/hooks.ts`.
-
-- Replace wagmi with the Solana wallet adapter (`@solana/wallet-adapter-react` + `-react-ui`,
-  Phantom/Solflare/Backpack via Wallet Standard). Keep `@tanstack/react-query`.
-- Delete `lib/contracts/abis.ts` and `wagmi.ts`; add the IDL (`anchor/target/idl/folio_vault.json`
-  plus its TS types) and `addresses.devnet.json`.
-- **Deposit**: fetch `/api/prices?vault=…`, then one transaction containing
-  `Ed25519Program.createInstructionWithPublicKey({ publicKey, message, signature })` **immediately
-  followed by** `deposit(amount, min_shares, prices)` with remaining accounts `[mint, vault_ata]` for
-  each held mint. No "approve" step on Solana.
-- **Redeem**: `createAssociatedTokenAccountIdempotent` for each held mint the user lacks, then
-  `redeem(shares, [])` with remaining accounts `[mint, vault_ata, user_ata]` per held mint.
-- Share price = vault value / `total_shares` (both in USDC base units; shares have 6 decimals).
-- Remove every 0x-address `isAddress` check: addresses are base58 now.
-
-### Task 4 — Curator console (Part 4)
-Files: `app/curator/**`, `components/curator/**`.
-- Create vault: `create_vault(name, manager)`; the vault PDA uses the **current**
-  `registry.vault_count` — read it right before sending.
-- Seed: `seed(amount)` ≥ 10 USDC. Activate is guardian-only (demo: the deployer wallet is guardian).
-- Plan: `set_plan(text)`, 1–1000 bytes.
-- Rebalance: `/api/trade` + `/api/prices` → `[ed25519 ix, rebalance(max_sell, min_buy, route_data,
-  prices)]`. Add a `ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })` first.
-- Then: Vercel deploy, README demo transactions, demo video.
-
-### Task 5 — Cleanups
-- Update `AGENTS.md` (and `CLAUDE.md`, which just includes it) for Solana: parts, file ownership,
-  these interfaces.
-- Add a malicious-router test (a router that also transfers another held token, or approves a
-  delegate) — it must fail with `CollateralDecreased` / `AuthorityChanged`.
-- `docs/` still describes the EVM contracts; add a note or update it.
+### Task 5 — Nice to have
+Malicious-router test; Jupiter route for mainnet in `lib/trade/build.ts`; Pyth prices instead of the signer.
 
 ## 5. Interfaces (the contract other parts build against)
 
@@ -184,12 +160,16 @@ Events: `VaultCreated, Seeded, StateChanged, Deposited, Redeemed, PlanPosted, Re
 Errors: see `anchor/programs/folio_vault/src/errors.rs` (e.g. `TradeLossTooHigh`, `StalePrices`,
 `InvalidPriceSignature`, `MissingPrice`, `WrongState`, `NoPlanPosted`).
 
-### 5.4 API responses (proposed; same routes as BNB)
+### 5.4 API responses (implemented)
 - `GET /api/prices?vault=<base58>[&include=<mint>,…]` →
-  `{ update: { mints, prices, timestamp }, message, signature, signer, expiresAt }` (numbers as strings, bytes as base64)
-- `GET /api/trade?vault=…&sell=<mint>&buy=<mint>&amount=…` →
-  `{ maxSell, minBuy, routeData (base64), routeAccounts: [{ pubkey, isSigner, isWritable }], warning? }`
-- `GET /api/vaults/<base58>` → `{ holdings: [{ mint, symbol, amount, priceUsd, valueUsd }], totalValueUsd, sharePriceUsd, plan, planVersion, state }`
+  `{ update: { mints, prices, timestamp }, message, signature, signer, expiresAt, quotes }` (numbers as strings, bytes base64)
+- `GET /api/trade?vault=…&sell=<mint>&buy=<mint>&amount=<base units>[&slippage=1]` →
+  `{ trade: { router, sellMint, buyMint, maxSell, minBuy, routeData, routeAccounts[] }, quote: { expectedBuyAmount, slippagePercent, route, lossPercent }, computeUnits, warnings[] }`
+- `GET /api/vaults[?account=…]` → `{ vaults: VaultView[] }`; `GET /api/vaults/<base58>[?account=…]` → `VaultView`
+  (`holdings[{ asset, symbol, decimals, amount, priceUsd, valueUsd }]`, `totalValueUsd`, `sharePriceUsd`, `plan`, `position`, `state`, `shareDecimals: 6`)
+- `GET /api/history[?vault][&account][&limit]` → `{ items: ActivityItem[], latestBlock }` (amounts human-readable)
+- `POST /api/faucet {account}` → `{ transaction }` (base64, faucet-signed; wallet signs and sends)
+- `POST /api/vaults/<base58>/activate` → `{ ok, signature }` (devnet/localnet only)
 
 ## 6. Toolchain and gotchas (verified)
 
