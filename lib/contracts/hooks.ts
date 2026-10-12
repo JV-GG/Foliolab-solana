@@ -67,6 +67,9 @@ export function programErrorName(error: unknown): string | null {
 /** Turns a wallet or program failure into a sentence an investor can act on. */
 export function explainError(error: unknown): string {
   const message = String((error as {message?: string})?.message ?? '');
+  if (/\b429\b|rate limit/i.test(message)) {
+    return 'The Solana devnet RPC is busy (rate limited). Wait a few seconds and try again.';
+  }
   if (/rejected|declined|cancel/i.test(message)) {
     return 'You cancelled the request in your wallet.';
   }
@@ -107,17 +110,32 @@ export type DepositStep = 'idle' | 'approving' | 'pricing' | 'depositing' | 'don
 /** Bounds the deposit at 0.5% fewer shares than the estimate, in case balances change first. */
 const MIN_SHARES_BPS = BigInt(9_950);
 
-/** Fresh on-chain view of a vault: held mints, their token programs, balances and share supply. */
+/**
+ * Fresh on-chain view of a vault in two RPC calls (the public devnet RPC rate-limits hard): the vault
+ * account, then every held mint and the vault's token account for it in one batch.
+ */
 async function vaultSnapshot(connection: Connection, vault: PublicKey) {
   const program = folioProgram(connection);
-  const v = await program.account.vault.fetch(vault);
-  const programs = await tokenProgramsOf(connection, v.held);
-  const balances = await Promise.all(
-    v.held.map(async (mint) => {
-      const r = await connection.getTokenAccountBalance(ata(vault, mint, programs.get(mint.toBase58())!)).catch(() => null);
-      return {amount: BigInt(r?.value.amount ?? '0'), decimals: r?.value.decimals ?? 0};
-    }),
+  const info = await connection.getAccountInfo(vault);
+  if (!info) throw new Error('This vault was not found on-chain.');
+  const v = program.coder.accounts.decode<Awaited<ReturnType<typeof program.account.vault.fetch>>>('vault', info.data);
+  const mintInfos = await connection.getMultipleAccountsInfo(v.held);
+  const programs = new Map<string, PublicKey>();
+  v.held.forEach((mint, i) => {
+    const owner = mintInfos[i]?.owner;
+    if (!owner) throw new Error(`Token ${mint.toBase58()} not found`);
+    programs.set(mint.toBase58(), owner);
+  });
+  const accounts = await connection.getMultipleAccountsInfo(
+    v.held.map((mint) => ata(vault, mint, programs.get(mint.toBase58())!)),
   );
+  const balances = v.held.map((_, i) => {
+    const data = accounts[i]?.data;
+    // The base token-account layout is the same in both token programs: amount is a u64 at byte 64.
+    const amount = data && data.length >= 72 ? new DataView(data.buffer, data.byteOffset + 64, 8).getBigUint64(0, true) : BigInt(0);
+    const mintData = mintInfos[i]!.data;
+    return {amount, decimals: mintData[44]}; // Mint layout: decimals at byte 44
+  });
   return {program, v, programs, balances};
 }
 
@@ -217,17 +235,24 @@ export function useRedeem() {
   const send = useSendTransaction();
   const [pending, setPending] = useState(false);
 
-  /** What redeeming `shares` would pay out right now, in kind (same rounding as the program). */
+  /**
+   * What redeeming `shares` would pay out right now, in kind (same rounding as the program). Read
+   * through our API, so opening the dialog costs the browser no RPC calls.
+   */
   const preview = useCallback(
     async (vaultAddress: string, shares: bigint, forfeit: readonly string[] = []): Promise<RedeemResult> => {
-      const {v, balances} = await vaultSnapshot(connection, new PublicKey(vaultAddress));
-      const supply = BigInt(v.totalShares.toString());
+      const res = await fetch(`/api/vaults/${vaultAddress}`, {cache: 'no-store'});
+      const view = (await res.json()) as VaultView & {error?: string};
+      if (!res.ok) throw new Error(view.error ?? 'Could not read the vault');
+      const supply = BigInt(view.totalSupply);
       return {
-        assets: v.held.map((m) => m.toBase58()),
-        amounts: v.held.map((m, i) => (forfeit.includes(m.toBase58()) || supply === BigInt(0) ? BigInt(0) : (balances[i].amount * shares) / supply)),
+        assets: view.holdings.map((h) => h.asset),
+        amounts: view.holdings.map((h) =>
+          forfeit.includes(h.asset) || supply === BigInt(0) ? BigInt(0) : (BigInt(h.amount) * shares) / supply,
+        ),
       };
     },
-    [connection],
+    [],
   );
 
   const redeem = useCallback(
@@ -237,8 +262,12 @@ export function useRedeem() {
       try {
         const owner = new PublicKey(address);
         const vault = new PublicKey(vaultAddress);
-        const out = await preview(vaultAddress, shares, forfeit);
-        const {program, v, programs} = await vaultSnapshot(connection, vault);
+        const {program, v, programs, balances} = await vaultSnapshot(connection, vault);
+        const supply = BigInt(v.totalShares.toString());
+        const out: RedeemResult = {
+          assets: v.held.map((m) => m.toBase58()),
+          amounts: v.held.map((m, i) => (forfeit.includes(m.toBase58()) ? BigInt(0) : (balances[i].amount * shares) / supply)),
+        };
         // Make sure the wallet has an account for every token it is about to receive.
         const createAccounts = v.held
           .filter((mint, i) => out.amounts[i] > BigInt(0))
@@ -267,7 +296,7 @@ export function useRedeem() {
         setPending(false);
       }
     },
-    [address, connection, preview, queryClient, send],
+    [address, connection, queryClient, send],
   );
 
   return {redeem, preview, pending};
@@ -281,11 +310,11 @@ export function useTokenBalance(mint: string | undefined) {
     queryKey: ['token-balance', mint ?? null, address ?? null],
     enabled: Boolean(mint && address),
     queryFn: async (): Promise<bigint> => {
+      // One RPC call. Mock USDC is a legacy SPL token; a missing account means a zero balance.
       const owner = new PublicKey(address!);
-      const program = (await connection.getAccountInfo(new PublicKey(mint!)))?.owner ?? TOKEN_PROGRAM_ID;
-      const r = await connection.getTokenAccountBalance(ata(owner, new PublicKey(mint!), program)).catch(() => null);
+      const r = await connection.getTokenAccountBalance(ata(owner, new PublicKey(mint!), TOKEN_PROGRAM_ID)).catch(() => null);
       return BigInt(r?.value.amount ?? '0');
     },
-    refetchInterval: 10_000,
+    refetchInterval: 30_000,
   });
 }

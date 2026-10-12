@@ -19,15 +19,30 @@ export class ApiError extends Error {
 export const CHAIN_DOWN =
   'The Solana RPC is not responding. Check SOLANA_RPC_URL (locally: is solana-test-validator running?) and try again.';
 
+export const RATE_LIMITED =
+  'The Solana devnet RPC is rate-limiting this app right now. Wait a few seconds and try again.';
+
+function errorText(error: unknown): string {
+  return String((error as {message?: string})?.message ?? error);
+}
+
+/** True when the RPC answered "too many requests" (HTTP 429), as free public endpoints often do. */
+export function isRateLimited(error: unknown): boolean {
+  return /\b429\b|rate limit/i.test(errorText(error));
+}
+
 /** True when an error means the RPC could not be reached, not that a read failed. */
 export function isChainDown(error: unknown): boolean {
-  const text = String((error as {message?: string})?.message ?? error);
-  return /fetch failed|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|socket hang up|failed to get|429/i.test(text);
+  return isRateLimited(error) || /fetch failed|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|socket hang up|failed to get/i.test(errorText(error));
+}
+
+function chainDownMessage(error: unknown): string {
+  return isRateLimited(error) ? RATE_LIMITED : CHAIN_DOWN;
 }
 
 /** A failed read of a supposed vault: either the RPC is down, or the address is not a vault. */
 export function vaultReadError(error: unknown, address: string): ApiError {
-  return isChainDown(error) ? new ApiError(CHAIN_DOWN, 503) : new ApiError(`${address} is not a Folio vault on this cluster`, 404);
+  return isChainDown(error) ? new ApiError(chainDownMessage(error), 503) : new ApiError(`${address} is not a Folio vault on this cluster`, 404);
 }
 
 let cached: Connection | undefined;
@@ -52,7 +67,7 @@ export function errorResponse(error: unknown, route: string): Response {
   if (error instanceof ApiError) {
     return Response.json({error: error.message, details: error.details}, {status: error.status, headers});
   }
-  if (isChainDown(error)) return Response.json({error: CHAIN_DOWN}, {status: 503, headers});
+  if (isChainDown(error)) return Response.json({error: chainDownMessage(error)}, {status: 503, headers});
   console.error(`[${route}]`, error);
   return Response.json({error: 'Unexpected server error'}, {status: 500, headers});
 }

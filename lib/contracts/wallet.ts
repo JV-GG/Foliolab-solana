@@ -5,7 +5,7 @@
  * transaction and wait for it. Wraps @solana/wallet-adapter-react so components never touch it.
  */
 import {useConnection as useSolanaConnection, useWallet} from '@solana/wallet-adapter-react';
-import {Transaction, type Signer, type TransactionInstruction} from '@solana/web3.js';
+import {Transaction, type Connection, type Signer, type TransactionInstruction} from '@solana/web3.js';
 import {useCallback} from 'react';
 import {CLUSTER, explorerUrl} from '@/lib/solana/config';
 
@@ -13,6 +13,25 @@ export const appChainLabel =
   CLUSTER === 'mainnet-beta' ? 'Solana' : CLUSTER === 'devnet' ? 'Solana devnet' : 'Local Solana validator';
 export const isTestCluster = CLUSTER !== 'mainnet-beta';
 export {explorerUrl};
+
+/**
+ * Polls the signature status instead of using a websocket subscription: the public devnet RPC
+ * rate-limits websockets (HTTP 429), and a lost subscription would leave the UI waiting forever.
+ */
+async function waitForConfirmation(connection: Connection, signature: string, lastValidBlockHeight: number) {
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    const {value} = await connection.getSignatureStatuses([signature]).catch(() => ({value: [null]}));
+    const status = value[0];
+    if (status?.err) throw new Error(`The transaction failed on-chain: ${JSON.stringify(status.err)}`);
+    if (status && (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')) return;
+    if (attempt % 10 === 9) {
+      const height = await connection.getBlockHeight('confirmed').catch(() => 0);
+      if (height > lastValidBlockHeight) throw new Error('The transaction expired before it landed. Try again.');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+  }
+  throw new Error(`Still waiting for confirmation. Check it on Solana Explorer: ${signature}`);
+}
 
 /** The connected wallet, in the shape the components already use. */
 export function useConnection(): {address: string | undefined; isConnected: boolean} {
@@ -40,11 +59,7 @@ export function useSendTransaction() {
         if (signers.length) tx.partialSign(...signers);
       }
       const signature = await sendTransaction(tx, connection, {preflightCommitment: 'confirmed'});
-      const result = await connection.confirmTransaction(
-        {signature, blockhash: tx.recentBlockhash ?? blockhash, lastValidBlockHeight: tx.lastValidBlockHeight ?? lastValidBlockHeight},
-        'confirmed',
-      );
-      if (result.value.err) throw new Error(`The transaction failed on-chain: ${JSON.stringify(result.value.err)}`);
+      await waitForConfirmation(connection, signature, tx.lastValidBlockHeight ?? lastValidBlockHeight);
       return signature;
     },
     [connection, publicKey, sendTransaction],
