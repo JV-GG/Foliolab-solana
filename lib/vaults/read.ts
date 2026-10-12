@@ -205,48 +205,52 @@ export async function readVault(vaultParam: string, account?: PublicKey, prices?
         else if (statusKey === 'rejected') status = 'Rejected';
         else if (statusKey === 'executed') status = 'Executed';
 
-        const totalVotes = prop.yesVotes.add(prop.noVotes);
-        const yesPercent = totalVotes.gt(new BN(0))
-          ? (prop.yesVotes.toNumber() / totalVotes.toNumber()) * 100
-          : 0;
-        const noPercent = totalVotes.gt(new BN(0))
-          ? (prop.noVotes.toNumber() / totalVotes.toNumber()) * 100
-          : 0;
-        const quorumReached = prop.totalShares.gt(new BN(0)) &&
-          totalVotes.mul(new BN(10000)).div(prop.totalShares).toNumber() >= 2000;
-        const hasPassed = quorumReached && prop.yesVotes.gt(prop.noVotes);
+        if (status === 'Executed' || status === 'Rejected') {
+          openProposal = null;
+        } else {
+          const totalVotes = prop.yesVotes.add(prop.noVotes);
+          const yesPercent = totalVotes.gt(new BN(0))
+            ? (prop.yesVotes.toNumber() / totalVotes.toNumber()) * 100
+            : 0;
+          const noPercent = totalVotes.gt(new BN(0))
+            ? (prop.noVotes.toNumber() / totalVotes.toNumber()) * 100
+            : 0;
+          const quorumReached = prop.totalShares.gt(new BN(0)) &&
+            totalVotes.mul(new BN(10000)).div(prop.totalShares).toNumber() >= 2000;
+          const hasPassed = quorumReached && prop.yesVotes.gt(prop.noVotes);
 
-        let userVote: ProposalView['userVote'] = null;
-        if (account) {
-          const vr = await program.account.voteRecord.fetchNullable(voteRecordPda(proposalAddress, account));
-          if (vr) {
-            userVote = {
-              voted: true,
-              isYes: vr.approve,
-              shares: vr.weight.toString(),
-            };
+          let userVote: ProposalView['userVote'] = null;
+          if (account) {
+            const vr = await program.account.voteRecord.fetchNullable(voteRecordPda(proposalAddress, account));
+            if (vr) {
+              userVote = {
+                voted: true,
+                isYes: vr.approve,
+                shares: vr.weight.toString(),
+              };
+            }
           }
-        }
 
-        openProposal = {
-          id: prop.id.toNumber(),
-          address: proposalAddress.toBase58(),
-          proposer: prop.proposer.toBase58(),
-          bondLamports: prop.bond.toString(),
-          planText: prop.plan,
-          targets: propTargets,
-          votingEndsAt: prop.votingEndsAt.toNumber() * 1000,
-          timelockEndsAt: prop.timelockEndsAt.toNumber() * 1000,
-          snapshotShares: prop.totalShares.toString(),
-          yesShares: prop.yesVotes.toString(),
-          noShares: prop.noVotes.toString(),
-          status,
-          yesPercent: Math.round(yesPercent * 10) / 10,
-          noPercent: Math.round(noPercent * 10) / 10,
-          quorumReached,
-          hasPassed,
-          userVote,
-        };
+          openProposal = {
+            id: prop.id.toNumber(),
+            address: proposalAddress.toBase58(),
+            proposer: prop.proposer.toBase58(),
+            bondLamports: prop.bond.toString(),
+            planText: prop.plan,
+            targets: propTargets,
+            votingEndsAt: prop.votingEndsAt.toNumber() * 1000,
+            timelockEndsAt: prop.timelockEndsAt.toNumber() * 1000,
+            snapshotShares: prop.totalShares.toString(),
+            yesShares: prop.yesVotes.toString(),
+            noShares: prop.noVotes.toString(),
+            status,
+            yesPercent: Math.round(yesPercent * 10) / 10,
+            noPercent: Math.round(noPercent * 10) / 10,
+            quorumReached,
+            hasPassed,
+            userVote,
+          };
+        }
       }
     } catch {
       openProposal = null;

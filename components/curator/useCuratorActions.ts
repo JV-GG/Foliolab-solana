@@ -225,6 +225,10 @@ export function useCuratorActions() {
           })
           .instruction();
         const signature = await send([ix]);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(`folio_has_proposal_${vaultAddress}`, 'true');
+          localStorage.removeItem(`folio_closed_proposal_${vaultAddress}`);
+        }
         await refresh();
         return signature;
       } finally {
@@ -386,7 +390,23 @@ export function useCuratorActions() {
         }
         const {recommendation: rec} = await crankCheckRes.json();
         if (!rec?.eligible || !rec.overweightAsset || !rec.underweightAsset || !rec.suggestedSellAmount) {
-          throw new Error('All assets are already balanced within the target drift band.');
+          if (vault.openProposal || (typeof window !== 'undefined' && localStorage.getItem(`folio_has_proposal_${vault.address}`))) {
+            try {
+              await fetch('/api/proposal/refund', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({vault: vault.address, curator: vault.manager}),
+              });
+              if (typeof window !== 'undefined') {
+                localStorage.setItem(`folio_closed_proposal_${vault.address}`, String(vault.openProposal?.id ?? 'closed'));
+                localStorage.removeItem(`folio_has_proposal_${vault.address}`);
+              }
+              await refresh();
+            } catch {
+              // ignore
+            }
+          }
+          throw new Error('All assets are already balanced within target drift band. Proposal bond refunded & voting panel closed.');
         }
 
         // 2. Fetch trade route quote
@@ -471,6 +491,23 @@ export function useCuratorActions() {
           buyMint: tradeMetadata[i]?.buyMint || '',
           symbol: tradeMetadata[i]?.symbol,
         }));
+
+        // Immediately refund the 0.05 SOL proposal bond and close the voting panel
+        if (vault.openProposal || (typeof window !== 'undefined' && localStorage.getItem(`folio_has_proposal_${vault.address}`))) {
+          try {
+            await fetch('/api/proposal/refund', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({vault: vault.address, curator: vault.manager}),
+            });
+            if (typeof window !== 'undefined') {
+              localStorage.setItem(`folio_closed_proposal_${vault.address}`, String(vault.openProposal?.id ?? 'closed'));
+              localStorage.removeItem(`folio_has_proposal_${vault.address}`);
+            }
+          } catch (refundErr) {
+            console.warn('Proposal bond refund notice:', refundErr);
+          }
+        }
 
         await refresh();
         return {

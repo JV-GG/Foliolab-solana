@@ -415,11 +415,21 @@ export function PlanCard({vault, managerAllowed}: Props) {
       {/* Active Proposal Status Notice */}
       {vault.openProposal && (
         <div className="rounded-xl border border-[#c2b280] bg-[#fdfbf4] p-3 text-xs leading-relaxed text-[#7a6b32]">
-          <strong className="block font-semibold">Active Governance Proposal Open</strong>
-          <p className="mt-1">
-            Proposal #{vault.openProposal.id} is currently in <strong>{vault.openProposal.status}</strong> status.
-            Investors are reviewing and voting on new target weights. Additional proposals cannot be submitted until this cycle concludes.
+          <div className="flex items-center justify-between font-semibold">
+            <span>Active Governance Proposal #{vault.openProposal.id}</span>
+            <span className="font-mono text-[10px] uppercase">{vault.openProposal.status}</span>
+          </div>
+          <p className="mt-1 text-[11px] text-[#6b746c]">
+            Bond attached: {formatSol(vault.openProposal.bondLamports)}. Performing rebalance will immediately refund this bond to your wallet and close the voting panel.
           </p>
+          <button
+            type="button"
+            onClick={() => void handleForceRebalance()}
+            disabled={rebalancePending}
+            className="folio-button-primary mt-2 w-full py-2 text-[11px]"
+          >
+            {rebalancePending ? 'Rebalancing & Refunding Bond…' : '⚡ Rebalance & Refund 0.05 SOL Bond'}
+          </button>
         </div>
       )}
 

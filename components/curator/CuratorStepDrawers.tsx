@@ -565,24 +565,46 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                     {publishing ? 'Publishing on-chain…' : 'Publish Strategy & Targets →'}
                   </button>
                 ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => void handleSaveStrategy()}
-                      disabled={!validLength || !validWeights || publishing}
-                      className="folio-button-quiet flex-1 py-2 text-[11px]"
-                    >
-                      Instant Update (Curator)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowProposeModal(true)}
-                      disabled={!validLength || !validWeights || publishing}
-                      className="folio-button-primary flex-1 py-2 text-[11px]"
-                    >
-                      Propose to Investors →
-                    </button>
-                  </>
+                  <div className="w-full space-y-2">
+                    {vault.openProposal ? (
+                      <div className="rounded-lg border border-[#c2b280] bg-[#fffbf0] p-2.5 text-[11px] text-[#7a6b32]">
+                        <div className="flex items-center justify-between font-bold">
+                          <span>Governance Proposal #{vault.openProposal.id}</span>
+                          <span className="font-mono text-[10px] uppercase">{vault.openProposal.status}</span>
+                        </div>
+                        <p className="mt-1 text-[10px] text-[#6b746c]">
+                          Bond attached: {formatSol(vault.openProposal.bondLamports)}. Performing rebalance will immediately refund this bond to your wallet and close the voting panel.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => void handleForceRebalance()}
+                          disabled={rebalancePending}
+                          className="folio-button-primary mt-2 w-full py-2 text-[11px]"
+                        >
+                          {rebalancePending ? 'Rebalancing & Refunding Bond…' : '⚡ Rebalance & Refund 0.05 SOL Bond'}
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setShowProposeModal(true)}
+                          disabled={!validLength || !validWeights || publishing}
+                          className="folio-button-primary w-full py-2 text-[11px]"
+                        >
+                          Propose Strategy Amendment to Investors →
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleForceRebalance()}
+                          disabled={rebalancePending}
+                          className="folio-button-secondary w-full py-2 text-[11px]"
+                        >
+                          {rebalancePending ? 'Executing Rebalance…' : '⚡ Force Rebalance Vault Assets Now'}
+                        </button>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
             )}

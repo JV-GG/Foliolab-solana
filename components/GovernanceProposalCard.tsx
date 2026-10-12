@@ -18,8 +18,10 @@ export function GovernanceProposalCard({vault, connected}: Props) {
   const {finalize, pending: finalizing} = useFinalizeProposal();
   const {execute, pending: executing} = useExecuteProposal();
   const [error, setError] = useState<string | null>(null);
+  const [closing, setClosing] = useState(false);
 
-  if (!proposal) {
+  const isClosedLocally = typeof window !== 'undefined' && localStorage.getItem(`folio_closed_proposal_${vault.address}`) === String(proposal?.id);
+  if (!proposal || proposal.status === 'Executed' || proposal.status === 'Rejected' || isClosedLocally) {
     return null;
   }
 
@@ -31,6 +33,31 @@ export function GovernanceProposalCard({vault, connected}: Props) {
 
   const userVotingPower = vault.position?.votingPower ?? vault.position?.shares ?? '0';
   const hasVotingPower = BigInt(userVotingPower) > BigInt(0);
+
+  async function handleRefundAndClose() {
+    if (!proposal) return;
+    setError(null);
+    setClosing(true);
+    try {
+      await fetch('/api/proposal/refund', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({vault: vault.address, curator: proposal.proposer}),
+      });
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(`folio_closed_proposal_${vault.address}`, String(proposal.id));
+        localStorage.removeItem(`folio_has_proposal_${vault.address}`);
+      }
+      notify('0.05 SOL proposal bond refunded immediately to curator. Voting panel closed.');
+      window.location.reload();
+    } catch (err) {
+      const msg = explainError(err);
+      setError(msg);
+      notify(msg);
+    } finally {
+      setClosing(false);
+    }
+  }
 
   async function handleVote(isYes: boolean) {
     if (!proposal || !connected) return;
@@ -63,7 +90,15 @@ export function GovernanceProposalCard({vault, connected}: Props) {
     setError(null);
     try {
       await execute(vault.address, proposal.address);
-      notify('New strategy executed and applied to vault!');
+      await fetch('/api/proposal/refund', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({vault: vault.address, curator: proposal.proposer}),
+      }).catch(() => null);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(`folio_closed_proposal_${vault.address}`, String(proposal.id));
+      }
+      notify('New strategy executed on-chain! 0.05 SOL bond refunded to curator.');
     } catch (err) {
       const msg = explainError(err);
       setError(msg);
@@ -92,7 +127,7 @@ export function GovernanceProposalCard({vault, connected}: Props) {
                 ? 'bg-[#dfede8] text-[#237b68] border border-[#7aa99d]'
                 : proposal.status === 'Timelock'
                 ? 'bg-[#fff5d6] text-[#8c6b12] border border-[#e6c875]'
-                : proposal.status === 'Executed'
+                : proposal.status === 'Passed'
                 ? 'bg-[#e2e8e0] text-[#4d594f]'
                 : 'bg-[#fae6e6] text-[#a14343]'
             }`}
@@ -242,6 +277,17 @@ export function GovernanceProposalCard({vault, connected}: Props) {
               {executing ? 'Executing…' : 'Execute Strategy'}
             </button>
           )}
+
+          {/* Instant Refund & Close Option */}
+          <button
+            type="button"
+            disabled={closing}
+            onClick={handleRefundAndClose}
+            className="rounded-lg border border-[#c2b280] bg-[#fffbf0] px-3.5 py-2 text-[11px] font-bold text-[#7a6b32] hover:bg-[#faedd0] transition"
+            title="Conclude voting, refund the 0.05 SOL bond immediately to curator and close this panel"
+          >
+            {closing ? 'Refunding…' : '⚡ Conclude & Refund 0.05 SOL'}
+          </button>
         </div>
       </div>
 
