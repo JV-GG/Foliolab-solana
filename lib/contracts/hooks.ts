@@ -63,12 +63,18 @@ export function programErrorName(error: unknown): string | null {
   if (named) return named[1];
   const hex = /custom program error: 0x([0-9a-f]+)/i.exec(text);
   if (hex) return PROGRAM_ERRORS.get(parseInt(hex[1], 16)) ?? null;
+  // A transaction that failed on-chain (sent without preflight): {"InstructionError":[2,{"Custom":6026}]}
+  const custom = /"Custom":\s*(\d+)/.exec(text);
+  if (custom) return PROGRAM_ERRORS.get(Number(custom[1])) ?? null;
   return null;
 }
 
 /** Turns a wallet or program failure into a sentence an investor can act on. */
 export function explainError(error: unknown): string {
   const message = String((error as {message?: string})?.message ?? '');
+  if (/blockhash not found|block height exceeded|expired before it landed/i.test(message)) {
+    return 'The network took too long to see this transaction. Nothing was sent; please try again.';
+  }
   if (/\b429\b|rate limit/i.test(message)) {
     return 'The Solana devnet RPC is busy (rate limited). Wait a few seconds and try again.';
   }
