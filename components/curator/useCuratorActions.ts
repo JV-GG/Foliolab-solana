@@ -367,34 +367,126 @@ export function useCuratorActions() {
       vault: VaultView,
       onStage?: (stage: RebalanceStage) => void,
     ): Promise<RebalanceResult> => {
+      const keeper = requireWallet();
       setAction('simulating');
       onStage?.('simulating');
-      try {
-        const crankRes = await fetch('/api/crank', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({vault: vault.address, force: true}),
-        });
+      const executedTrades: {signature: string; sellAmount: string; buyMint: string; symbol?: string}[] = [];
 
-        if (crankRes.ok) {
-          const data = await crankRes.json();
-          const trades = data.trades ?? [];
-          await refresh();
-          return {
-            hash: trades[trades.length - 1]?.signature || '',
-            simulatedSold: BigInt(0),
-            simulatedBought: BigInt(0),
-            trades,
-          };
+      try {
+        const vaultPubkey = new PublicKey(vault.address);
+        const program = folioProgram(connection);
+
+        // Rebalance each underweight asset in sequence according to target percentages
+        for (let step = 0; step < 5; step++) {
+          const crankCheckRes = await fetch(`/api/crank?vault=${vault.address}&force=true`, {cache: 'no-store'});
+          if (!crankCheckRes.ok) {
+            const err = await crankCheckRes.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to check vault rebalance status');
+          }
+          const {recommendation: rec} = await crankCheckRes.json();
+          if (!rec?.eligible || !rec.overweightAsset || !rec.underweightAsset || !rec.suggestedSellAmount) {
+            break;
+          }
+
+          const tradeRes = await fetch(
+            `/api/trade?vault=${vault.address}&sell=${rec.overweightAsset}&buy=${rec.underweightAsset}&amount=${rec.suggestedSellAmount}&slippage=1`,
+            {cache: 'no-store'},
+          );
+          if (!tradeRes.ok) {
+            const err = await tradeRes.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to calculate trade route');
+          }
+          const quote: TradeQuote = await tradeRes.json();
+
+          const pricesRes = await fetch(
+            `/api/prices?vault=${vault.address}&include=${rec.underweightAsset}`,
+            {cache: 'no-store'},
+          );
+          if (!pricesRes.ok) {
+            const err = await pricesRes.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to fetch signed prices');
+          }
+          const signedPrices: SignedPrices = await pricesRes.json();
+
+          const v = await program.account.vault.fetch(vaultPubkey);
+          const sell = new PublicKey(rec.overweightAsset);
+          const buy = new PublicKey(rec.underweightAsset);
+          const programs = await tokenProgramsOf(connection, [...v.held, buy]);
+          const sellProgram = programs.get(sell.toBase58())!;
+          const buyProgram = programs.get(buy.toBase58())!;
+
+          const rebalanceIx = await program.methods
+            .rebalance(
+              new BN(quote.trade.maxSell),
+              new BN(quote.trade.minBuy),
+              Buffer.from(quote.trade.routeData, 'base64'),
+              toPriceArg(signedPrices.update),
+            )
+            .accountsPartial({
+              keeper,
+              registry: registryPda(),
+              vault: vaultPubkey,
+              sellMint: sell,
+              buyMint: buy,
+              vaultSell: ata(vaultPubkey, sell, sellProgram),
+              vaultBuy: ata(vaultPubkey, buy, buyProgram),
+              router: new PublicKey(quote.trade.router),
+              sellTokenProgram: sellProgram,
+              buyTokenProgram: buyProgram,
+              associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+              systemProgram: SystemProgram.programId,
+              instructions: SYSVAR_INSTRUCTIONS,
+            })
+            .remainingAccounts([
+              ...heldAccounts(vaultPubkey, v.held, programs),
+              ...quote.trade.routeAccounts.map((a) => ({...a, pubkey: new PublicKey(a.pubkey)})),
+            ])
+            .instruction();
+
+          setAction('rebalancing');
+          onStage?.('wallet');
+          const signature = await send([
+            ComputeBudgetProgram.setComputeUnitLimit({units: quote.computeUnits || 400_000}),
+            priceSignatureIx(signedPrices),
+            rebalanceIx,
+          ]);
+          onStage?.('confirmed');
+
+          executedTrades.push({
+            signature,
+            sellAmount: quote.trade.maxSell,
+            buyMint: rec.underweightAsset,
+            symbol: rec.underweightSymbol,
+          });
         }
 
-        const errorBody = await crankRes.json().catch(() => null);
-        throw new Error(errorBody?.error || 'Failed to execute keeper rebalance cycle');
+        if (executedTrades.length === 0) {
+          throw new Error('All assets are already balanced within the target drift band.');
+        }
+
+        await refresh();
+        return {
+          hash: executedTrades[executedTrades.length - 1].signature,
+          simulatedSold: BigInt(0),
+          simulatedBought: BigInt(0),
+          trades: executedTrades,
+        };
+      } catch (err: any) {
+        if (executedTrades.length > 0) {
+          await refresh();
+          return {
+            hash: executedTrades[executedTrades.length - 1].signature,
+            simulatedSold: BigInt(0),
+            simulatedBought: BigInt(0),
+            trades: executedTrades,
+          };
+        }
+        throw err;
       } finally {
         setAction('idle');
       }
     },
-    [refresh],
+    [connection, refresh, requireWallet, send],
   );
 
   return {

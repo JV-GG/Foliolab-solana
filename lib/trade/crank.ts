@@ -129,22 +129,29 @@ async function sendRebalanceTx(
 ): Promise<string> {
   const bh = await conn.getLatestBlockhash('confirmed');
   if (altAddress) {
-    try {
-      const altAccount = (await conn.getAddressLookupTable(new PublicKey(altAddress))).value;
-      if (altAccount) {
-        const messageV0 = new TransactionMessage({
-          payerKey: keeper.publicKey,
-          recentBlockhash: bh.blockhash,
-          instructions,
-        }).compileToV0Message([altAccount]);
-        const txV0 = new VersionedTransaction(messageV0);
-        txV0.sign([keeper]);
+    const altAccount = (await conn.getAddressLookupTable(new PublicKey(altAddress))).value;
+    if (altAccount) {
+      const messageV0 = new TransactionMessage({
+        payerKey: keeper.publicKey,
+        recentBlockhash: bh.blockhash,
+        instructions,
+      }).compileToV0Message([altAccount]);
+      const txV0 = new VersionedTransaction(messageV0);
+      txV0.sign([keeper]);
+      try {
         const sig = await conn.sendTransaction(txV0);
         await conn.confirmTransaction({signature: sig, ...bh}, 'confirmed');
         return sig;
+      } catch (sendErr: any) {
+        const logs = sendErr?.logs || sendErr?.transactionLogs;
+        if (logs && Array.isArray(logs)) {
+          const revertMsg = logs.find((l: string) => l.includes('Error Message:'));
+          if (revertMsg) {
+            throw new Error(`Rebalance transaction reverted: ${revertMsg.replace(/^.*Error Message:\s*/, '')}`);
+          }
+        }
+        throw sendErr;
       }
-    } catch {
-      // Fallback to legacy
     }
   }
 
