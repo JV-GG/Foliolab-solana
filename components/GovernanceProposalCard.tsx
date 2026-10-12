@@ -3,6 +3,8 @@
 import {useState} from 'react';
 import type {VaultView} from '@/lib/vaults/read';
 import {useVote, useFinalizeProposal, useExecuteProposal, explainError} from '@/lib/contracts/hooks';
+import {useConnection} from '@/lib/contracts/wallet';
+import {sameAddress} from '@/components/curator/model';
 import {useNotify} from '@/components/Toast';
 import {formatSol, tokenAmount} from '@/lib/domain/format';
 
@@ -13,6 +15,8 @@ interface Props {
 
 export function GovernanceProposalCard({vault, connected}: Props) {
   const notify = useNotify();
+  const {address} = useConnection();
+  const isCurator = Boolean(address && sameAddress(vault.manager, address));
   const proposal = vault.openProposal;
   const {vote, pending: voting} = useVote();
   const {finalize, pending: finalizing} = useFinalizeProposal();
@@ -42,7 +46,7 @@ export function GovernanceProposalCard({vault, connected}: Props) {
       await fetch('/api/proposal/refund', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({vault: vault.address, curator: proposal.proposer}),
+        body: JSON.stringify({vault: vault.address, curator: proposal.proposer, proposalId: proposal.id}),
       });
       if (typeof window !== 'undefined') {
         localStorage.setItem(`folio_closed_proposal_${vault.address}`, String(proposal.id));
@@ -278,16 +282,18 @@ export function GovernanceProposalCard({vault, connected}: Props) {
             </button>
           )}
 
-          {/* Instant Refund & Close Option */}
-          <button
-            type="button"
-            disabled={closing}
-            onClick={handleRefundAndClose}
-            className="rounded-lg border border-[#c2b280] bg-[#fffbf0] px-3.5 py-2 text-[11px] font-bold text-[#7a6b32] hover:bg-[#faedd0] transition"
-            title="Conclude voting, refund the 0.05 SOL bond immediately to curator and close this panel"
-          >
-            {closing ? 'Refunding…' : '⚡ Conclude & Refund 0.05 SOL'}
-          </button>
+          {/* Instant Refund & Close Option (Curator only) */}
+          {isCurator && (
+            <button
+              type="button"
+              disabled={closing}
+              onClick={handleRefundAndClose}
+              className="rounded-lg border border-[#c2b280] bg-[#fffbf0] px-3.5 py-2 text-[11px] font-bold text-[#7a6b32] hover:bg-[#faedd0] transition"
+              title="Conclude voting, refund the 0.05 SOL bond immediately to curator and close this panel"
+            >
+              {closing ? 'Refunding…' : '⚡ Conclude & Refund 0.05 SOL'}
+            </button>
+          )}
         </div>
       </div>
 

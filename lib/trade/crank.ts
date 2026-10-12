@@ -52,7 +52,7 @@ export function evaluateRebalance(vault: VaultView, ignoreCooldown: boolean = fa
   if (!vault.targets || vault.targets.length === 0) {
     return {eligible: false, reason: 'No target weights configured'};
   }
-  if (Number(vault.gasTankLamports) < KEEPER_FEE_LAMPORTS) {
+  if (!ignoreCooldown && Number(vault.gasTankLamports) < KEEPER_FEE_LAMPORTS) {
     return {eligible: false, reason: `Gas tank has ${formatSol(vault.gasTankLamports)}; minimum ${formatSol(KEEPER_FEE_LAMPORTS)} required`};
   }
 
@@ -72,6 +72,7 @@ export function evaluateRebalance(vault: VaultView, ignoreCooldown: boolean = fa
 
   let mostOverweight = {asset: '', symbol: '', driftBps: 0, excessUsd: 0, decimals: 6};
   let mostUnderweight = {asset: '', symbol: '', driftBps: 0, deficitUsd: 0};
+  const threshold = ignoreCooldown ? 0 : DRIFT_BAND_BPS;
 
   for (const target of vault.targets) {
     const holding = vault.holdings.find((h) => h.asset === target.asset);
@@ -79,8 +80,8 @@ export function evaluateRebalance(vault: VaultView, ignoreCooldown: boolean = fa
     const currentBps = Math.floor((valueUsd / totalValue) * 10000);
     const driftBps = currentBps - target.targetBps;
 
-    if (driftBps > DRIFT_BAND_BPS && driftBps > mostOverweight.driftBps) {
-      const excessUsd = ((driftBps - DRIFT_BAND_BPS) / 10000) * totalValue;
+    if (driftBps > threshold && driftBps > mostOverweight.driftBps) {
+      const excessUsd = (driftBps / 10000) * totalValue;
       mostOverweight = {
         asset: target.asset,
         symbol: target.symbol,
@@ -88,8 +89,8 @@ export function evaluateRebalance(vault: VaultView, ignoreCooldown: boolean = fa
         excessUsd,
         decimals: holding?.decimals ?? 6,
       };
-    } else if (driftBps < -DRIFT_BAND_BPS && driftBps < mostUnderweight.driftBps) {
-      const deficitUsd = ((Math.abs(driftBps) - DRIFT_BAND_BPS) / 10000) * totalValue;
+    } else if (driftBps < -threshold && driftBps < mostUnderweight.driftBps) {
+      const deficitUsd = (Math.abs(driftBps) / 10000) * totalValue;
       mostUnderweight = {
         asset: target.asset,
         symbol: target.symbol,
@@ -100,15 +101,23 @@ export function evaluateRebalance(vault: VaultView, ignoreCooldown: boolean = fa
   }
 
   if (!mostOverweight.asset || !mostUnderweight.asset) {
-    return {eligible: false, reason: 'All assets are within the ±1% target drift band'};
+    return {
+      eligible: false,
+      reason: ignoreCooldown
+        ? 'All assets are already balanced at target weights'
+        : 'All assets are within the ±1% target drift band',
+    };
   }
 
   // Size trade to reduce drift without overshoot
   const tradeSizeUsd = Math.min(mostOverweight.excessUsd, mostUnderweight.deficitUsd);
+  if (tradeSizeUsd <= 0) {
+    return {eligible: false, reason: 'Calculated trade size is 0'};
+  }
   const holding = vault.holdings.find((h) => h.asset === mostOverweight.asset);
   const priceUsd = holding?.priceUsd ? Number(holding.priceUsd) : 1;
   const tokenAmount = tradeSizeUsd / priceUsd;
-  const rawSellUnits = BigInt(Math.floor(tokenAmount * 10 ** mostOverweight.decimals)).toString();
+  const rawSellUnits = BigInt(Math.max(1, Math.floor(tokenAmount * 10 ** mostOverweight.decimals))).toString();
 
   return {
     eligible: true,

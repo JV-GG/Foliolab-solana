@@ -1,6 +1,7 @@
 'use client';
 
 import {useState, useMemo} from 'react';
+import {useRouter} from 'next/navigation';
 import {PublicKey} from '@solana/web3.js';
 import {useNotify} from '@/components/Toast';
 import {explainError, useOnChainTokens, type VaultView} from '@/lib/contracts/hooks';
@@ -34,6 +35,7 @@ function formatShare(parts: bigint | null) {
 }
 
 export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: Props) {
+  const router = useRouter();
   const notify = useNotify();
   const {action, setStrategy, proposeStrategy, fundGas, forceRebalance} = useCuratorActions();
 
@@ -162,6 +164,26 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
       notify(message);
     } finally {
       setRebalancePending(false);
+    }
+  }
+
+  async function handleRefundProposal() {
+    if (!vault.openProposal || !managerAllowed) return;
+    try {
+      await fetch('/api/proposal/refund', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({vault: vault.address, curator: vault.manager, proposalId: vault.openProposal.id}),
+      });
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(`folio_closed_proposal_${vault.address}`, String(vault.openProposal.id));
+        localStorage.removeItem(`folio_has_proposal_${vault.address}`);
+      }
+      notify('Proposal concluded. 0.05 SOL bond refunded immediately to curator wallet.');
+      router.refresh();
+    } catch (caught) {
+      const message = explainError(caught);
+      notify(message);
     }
   }
 
@@ -419,7 +441,7 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
           <div className="space-y-4 border-t border-[#e2e6df] p-4 text-xs">
             <div className="flex items-center justify-between">
               <label className="text-[10px] font-bold uppercase tracking-wider text-[#6b746c]">
-                Target Asset Weights (Max 100% Total)
+                Target Asset Weights
               </label>
               <div className="flex items-center gap-2">
                 <span
@@ -490,7 +512,7 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                         <input
                           type="number"
                           min="0"
-                          max={maxAllowed}
+                          max="100"
                           step="1"
                           value={currentPct}
                           disabled={!managerAllowed || publishing}
@@ -507,7 +529,7 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                     <input
                       type="range"
                       min="0"
-                      max={maxAllowed}
+                      max="100"
                       step="1"
                       value={Math.min(currentPct, maxAllowed)}
                       disabled={!managerAllowed || publishing}
@@ -520,7 +542,7 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                     />
                     <div className="mt-1 flex items-center justify-between text-[9px] text-[#849087]">
                       <span>0%</span>
-                      <span>Max allowed: {maxAllowed}%</span>
+                      <span>100%</span>
                     </div>
                   </div>
                 );
@@ -573,16 +595,27 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                           <span className="font-mono text-[10px] uppercase">{vault.openProposal.status}</span>
                         </div>
                         <p className="mt-1 text-[10px] text-[#6b746c]">
-                          Bond attached: {formatSol(vault.openProposal.bondLamports)}. Performing rebalance will immediately refund this bond to your wallet and close the voting panel.
+                          Bond attached: {formatSol(vault.openProposal.bondLamports)}. You can force rebalancing now or conclude this proposal to immediately refund the bond to your wallet and close the voting panel.
                         </p>
-                        <button
-                          type="button"
-                          onClick={() => void handleForceRebalance()}
-                          disabled={rebalancePending}
-                          className="folio-button-primary mt-2 w-full py-2 text-[11px]"
-                        >
-                          {rebalancePending ? 'Rebalancing & Refunding Bond…' : '⚡ Rebalance & Refund 0.05 SOL Bond'}
-                        </button>
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void handleForceRebalance()}
+                            disabled={rebalancePending}
+                            className="folio-button-primary flex-1 py-2 text-[11px]"
+                          >
+                            {rebalancePending ? 'Executing Rebalance…' : '⚡ Force Rebalance Now'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleRefundProposal()}
+                            disabled={rebalancePending}
+                            className="rounded-lg border border-[#c2b280] bg-[#fffbf0] px-3 py-2 text-[11px] font-bold text-[#7a6b32] hover:bg-[#faedd0] transition"
+                            title="Conclude voting and refund 0.05 SOL bond immediately"
+                          >
+                            Conclude & Refund
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <>

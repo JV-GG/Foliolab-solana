@@ -390,23 +390,7 @@ export function useCuratorActions() {
         }
         const {recommendation: rec} = await crankCheckRes.json();
         if (!rec?.eligible || !rec.overweightAsset || !rec.underweightAsset || !rec.suggestedSellAmount) {
-          if (vault.openProposal || (typeof window !== 'undefined' && localStorage.getItem(`folio_has_proposal_${vault.address}`))) {
-            try {
-              await fetch('/api/proposal/refund', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({vault: vault.address, curator: vault.manager}),
-              });
-              if (typeof window !== 'undefined') {
-                localStorage.setItem(`folio_closed_proposal_${vault.address}`, String(vault.openProposal?.id ?? 'closed'));
-                localStorage.removeItem(`folio_has_proposal_${vault.address}`);
-              }
-              await refresh();
-            } catch {
-              // ignore
-            }
-          }
-          throw new Error('All assets are already balanced within target drift band. Proposal bond refunded & voting panel closed.');
+          throw new Error(rec?.reason || 'All assets are already balanced at their target weights.');
         }
 
         // 2. Fetch trade route quote
@@ -467,11 +451,24 @@ export function useCuratorActions() {
           ])
           .instruction();
 
-        instructionSets.push([
+        const currentGasTank = v.gasTank.toNumber();
+        const txIxs: TransactionInstruction[] = [
           ComputeBudgetProgram.setComputeUnitLimit({units: quote.computeUnits || 400_000}),
-          priceSignatureIx(signedPrices),
-          rebalanceIx,
-        ]);
+        ];
+        if (currentGasTank < 20_000) {
+          const fundGasIx = await program.methods
+            .fundGas(new BN(50_000))
+            .accountsPartial({
+              funder: keeper,
+              vault: vaultPubkey,
+              systemProgram: SystemProgram.programId,
+            })
+            .instruction();
+          txIxs.push(fundGasIx);
+        }
+        txIxs.push(priceSignatureIx(signedPrices), rebalanceIx);
+
+        instructionSets.push(txIxs);
         tradeMetadata.push({
           sellAmount: quote.trade.maxSell,
           buyMint: rec.underweightAsset,
@@ -498,7 +495,7 @@ export function useCuratorActions() {
             await fetch('/api/proposal/refund', {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({vault: vault.address, curator: vault.manager}),
+              body: JSON.stringify({vault: vault.address, curator: vault.manager, proposalId: vault.openProposal?.id}),
             });
             if (typeof window !== 'undefined') {
               localStorage.setItem(`folio_closed_proposal_${vault.address}`, String(vault.openProposal?.id ?? 'closed'));

@@ -21,6 +21,7 @@ import {
   REBALANCE_INTERVAL_SECONDS,
 } from '@/lib/solana/program';
 import {tokenByMint} from '@/lib/solana/config';
+import {isProposalClosed} from '@/lib/vaults/proposals';
 
 export const VAULT_STATES = ['DRAFT', 'SEEDED', 'ACTIVE', 'PAUSED', 'CLOSED'] as const;
 /** Shares use the settlement token's decimals (USDC: 6). */
@@ -205,7 +206,7 @@ export async function readVault(vaultParam: string, account?: PublicKey, prices?
         else if (statusKey === 'rejected') status = 'Rejected';
         else if (statusKey === 'executed') status = 'Executed';
 
-        if (status === 'Executed' || status === 'Rejected') {
+        if (status === 'Executed' || status === 'Rejected' || isProposalClosed(address.toBase58(), prop.id.toNumber())) {
           openProposal = null;
         } else {
           const totalVotes = prop.yesVotes.add(prop.noVotes);

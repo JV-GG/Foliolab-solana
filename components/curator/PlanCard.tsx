@@ -261,7 +261,7 @@ export function PlanCard({vault, managerAllowed}: Props) {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#59645c]">
-            Target Asset Weights (Max 100% Total)
+            Target Asset Weights
           </label>
           <div className="flex items-center gap-2">
             <span
@@ -337,7 +337,7 @@ export function PlanCard({vault, managerAllowed}: Props) {
                     <input
                       type="number"
                       min="0"
-                      max={maxAllowed}
+                      max="100"
                       step="1"
                       disabled={disabled}
                       value={currentVal}
@@ -354,7 +354,7 @@ export function PlanCard({vault, managerAllowed}: Props) {
                 <input
                   type="range"
                   min="0"
-                  max={maxAllowed}
+                  max="100"
                   step="1"
                   value={Math.min(currentVal, maxAllowed)}
                   disabled={disabled}
@@ -367,7 +367,7 @@ export function PlanCard({vault, managerAllowed}: Props) {
                 />
                 <div className="mt-0.5 flex items-center justify-between text-[9px] text-[#849087]">
                   <span>0%</span>
-                  <span>Max allowed: {maxAllowed}%</span>
+                  <span>100%</span>
                 </div>
               </div>
             );
