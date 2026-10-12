@@ -5,6 +5,7 @@ import {PublicKey} from '@solana/web3.js';
 import {useNotify} from '@/components/Toast';
 import {explainError, type VaultView} from '@/lib/contracts/hooks';
 import {deployment} from '@/lib/solana/config';
+import {formatSol} from '@/lib/domain/format';
 import {MAX_PLAN_BYTES, utf8ByteLength} from './model';
 import {useCuratorActions} from './useCuratorActions';
 
@@ -163,7 +164,7 @@ export function PlanCard({vault, managerAllowed}: Props) {
       <div className="flex items-center justify-between rounded-xl border border-[#cdd3ca] bg-[#f4f6f3] p-3 text-xs">
         <div>
           <span className="text-[10px] uppercase tracking-wider text-[#6b746c]">Keeper Gas Tank</span>
-          <div className="font-mono text-sm font-semibold text-[#2b3a30]">{gasSol} SOL</div>
+          <div className="font-mono text-sm font-semibold text-[#2b3a30]">{formatSol(vault.gasTankLamports || '0')}</div>
         </div>
         {managerAllowed && (
           <div className="flex items-center gap-1.5">
@@ -198,12 +199,12 @@ export function PlanCard({vault, managerAllowed}: Props) {
               </h3>
             </div>
             <span className="shrink-0 rounded-full border border-[#237b68]/20 bg-[#dfede8] px-2.5 py-1 font-mono text-[10px] font-bold text-[#237b68]">
-              Fee: 20k lamports
+              Fee: 0.00002 SOL
             </span>
           </div>
 
           <p className="mt-2 text-[11px] leading-[1.6] text-[#556156]">
-            Keepers automatically rebalance the portfolio every 12 hours when holdings drift &gt; 1% from targets. For live testing or demo presentations, you can force an on-chain rebalancing cycle immediately.
+            Keepers automatically rebalance the portfolio every 12 hours when holdings drift &gt; 1% from targets. For live testing or demo presentations, you can force an on-chain rebalancing cycle immediately (costs 0.00002 SOL from vault gas tank).
           </p>
 
           {rebalanceError && (

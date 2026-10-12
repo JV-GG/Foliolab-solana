@@ -2,6 +2,7 @@ import {Keypair, PublicKey, sendAndConfirmTransaction, Transaction, ComputeBudge
 import {ApiError, connection, parseKey} from '@/lib/chain/server';
 import {readVault, type VaultView} from '@/lib/vaults/read';
 import {buildTrade, REBALANCE_COMPUTE_UNITS} from '@/lib/trade/build';
+import {formatSol} from '@/lib/domain/format';
 import {signPricesForVault} from '@/lib/pricing/signer';
 import {
   BN,
@@ -37,7 +38,7 @@ export function evaluateRebalance(vault: VaultView, ignoreCooldown: boolean = fa
     return {eligible: false, reason: 'No target weights configured'};
   }
   if (Number(vault.gasTankLamports) < KEEPER_FEE_LAMPORTS) {
-    return {eligible: false, reason: `Gas tank has ${vault.gasTankLamports} lamports; minimum ${KEEPER_FEE_LAMPORTS} required`};
+    return {eligible: false, reason: `Gas tank has ${formatSol(vault.gasTankLamports)}; minimum ${formatSol(KEEPER_FEE_LAMPORTS)} required`};
   }
 
   const nowSec = Math.floor(Date.now() / 1000);

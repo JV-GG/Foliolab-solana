@@ -4,7 +4,7 @@ import {useState} from 'react';
 import type {VaultView} from '@/lib/vaults/read';
 import {useVote, useFinalizeProposal, useExecuteProposal, explainError} from '@/lib/contracts/hooks';
 import {useNotify} from '@/components/Toast';
-import {tokenAmount} from '@/lib/domain/format';
+import {formatSol, tokenAmount} from '@/lib/domain/format';
 
 interface Props {
   vault: VaultView;
@@ -80,19 +80,26 @@ export function GovernanceProposalCard({vault, connected}: Props) {
             Strategy Weight Amendment
           </h3>
         </div>
-        <span
-          className={`rounded-full px-3 py-1 text-[11px] font-bold tracking-wide uppercase ${
-            proposal.status === 'Voting'
-              ? 'bg-[#dfede8] text-[#237b68] border border-[#7aa99d]'
-              : proposal.status === 'Timelock'
-              ? 'bg-[#fff5d6] text-[#8c6b12] border border-[#e6c875]'
-              : proposal.status === 'Executed'
-              ? 'bg-[#e2e8e0] text-[#4d594f]'
-              : 'bg-[#fae6e6] text-[#a14343]'
-          }`}
-        >
-          {proposal.status}
-        </span>
+        <div className="flex items-center gap-2">
+          {proposal.bondLamports && (
+            <span className="rounded-full border border-[#2b4c3f]/20 bg-[#2b4c3f]/5 px-2.5 py-1 font-mono text-[10px] font-semibold text-[#2b4c3f]">
+              Bond: {formatSol(proposal.bondLamports)}
+            </span>
+          )}
+          <span
+            className={`rounded-full px-3 py-1 text-[11px] font-bold tracking-wide uppercase ${
+              proposal.status === 'Voting'
+                ? 'bg-[#dfede8] text-[#237b68] border border-[#7aa99d]'
+                : proposal.status === 'Timelock'
+                ? 'bg-[#fff5d6] text-[#8c6b12] border border-[#e6c875]'
+                : proposal.status === 'Executed'
+                ? 'bg-[#e2e8e0] text-[#4d594f]'
+                : 'bg-[#fae6e6] text-[#a14343]'
+            }`}
+          >
+            {proposal.status}
+          </span>
+        </div>
       </div>
 
       <div className="mt-4 text-[13px] leading-relaxed text-[#4d594f]">

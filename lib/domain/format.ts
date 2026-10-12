@@ -43,3 +43,23 @@ export function parseUnits(text: string, decimals: number): bigint {
   if (!match || (match[1] === '' && !match[2])) throw new Error(`Not a number: "${text}"`);
   return BigInt((match[1] || '0') + (match[2] ?? '').slice(0, decimals).padEnd(decimals, '0'));
 }
+
+/**
+ * Formats lamports into clean, human-readable SOL units.
+ * Examples:
+ *   20_000n -> "0.00002 SOL"
+ *   50_000_000n -> "0.05 SOL"
+ *   100_000_000n -> "0.1 SOL"
+ *   1_000_000_000n -> "1 SOL"
+ *   0n -> "0 SOL"
+ */
+export function formatSol(rawLamports: bigint | string | number, maxDigits = 6): string {
+  const lamports = BigInt(rawLamports.toString());
+  if (lamports === BigInt(0)) return '0 SOL';
+  const sol = Number(lamports) / 1e9;
+  const formatted = sol.toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: maxDigits,
+  });
+  return `${formatted} SOL`;
+}

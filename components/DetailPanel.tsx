@@ -1,6 +1,6 @@
 'use client';
 
-import {money, shortAddress, tokenAmount} from '@/lib/domain/format';
+import {formatSol, money, shortAddress, tokenAmount} from '@/lib/domain/format';
 import type {VaultView} from '@/lib/contracts/hooks';
 import {allocation} from './allocation';
 import {GovernanceProposalCard} from './GovernanceProposalCard';
@@ -18,7 +18,6 @@ export function DetailPanel({vault, connected, onTrade}: Props) {
   const supply = BigInt(vault.totalSupply);
   const sharePpm = supply > BigInt(0) ? Number(shares * BigInt(1_000_000) / supply) : null;
   const sharePercent = sharePpm === null ? null : sharePpm / 10_000;
-  const gasTankSol = (Number(vault.gasTankLamports ?? '0') / 1e9).toFixed(3);
 
   return (
     <article aria-label="Selected vault" className="folio-enter min-w-0 max-w-full overflow-x-clip">
@@ -30,7 +29,7 @@ export function DetailPanel({vault, connected, onTrade}: Props) {
               {vault.state}
             </span>
             <span className="rounded-full border border-[#7aa99d] bg-[#dfede8] px-2.5 py-0.5 text-[10px] font-semibold text-[#237b68]">
-              ⛽ Gas Tank: {gasTankSol} SOL
+              ⛽ Gas Tank: {formatSol(vault.gasTankLamports ?? '0')}
             </span>
           </div>
           <h1 className="page-title mt-5 break-words">{vault.name}</h1>

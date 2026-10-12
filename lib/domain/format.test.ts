@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { floorToCents, money, pct, tokenAmount } from './format';
+import { floorToCents, formatSol, money, pct, tokenAmount } from './format';
 
 describe('money', () => {
   test('formats as US dollars with two decimals', () => {
@@ -35,5 +35,27 @@ describe('tokenAmount', () => {
 
   test('groups thousands and drops a zero fraction', () => {
     expect(tokenAmount('1234000000', 6)).toBe('1,234');
+  });
+});
+
+describe('formatSol', () => {
+  test('formats zero lamports', () => {
+    expect(formatSol('0')).toBe('0 SOL');
+    expect(formatSol(0)).toBe('0 SOL');
+  });
+
+  test('formats keeper fee (20k lamports) nicely into 0.00002 SOL', () => {
+    expect(formatSol(20_000)).toBe('0.00002 SOL');
+    expect(formatSol('20000')).toBe('0.00002 SOL');
+  });
+
+  test('formats proposal bond (50m lamports) into 0.05 SOL', () => {
+    expect(formatSol(50_000_000)).toBe('0.05 SOL');
+    expect(formatSol('50000000')).toBe('0.05 SOL');
+  });
+
+  test('formats 1 SOL and fractional amounts', () => {
+    expect(formatSol(1_000_000_000)).toBe('1 SOL');
+    expect(formatSol(1_500_000_000)).toBe('1.5 SOL');
   });
 });

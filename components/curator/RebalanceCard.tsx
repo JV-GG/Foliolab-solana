@@ -226,12 +226,12 @@ export function RebalanceCard({vault, managerAllowed}: Props) {
             </h3>
           </div>
           <span className="shrink-0 rounded-full border border-[#237b68]/20 bg-[#dfede8] px-2.5 py-1 font-mono text-[10px] font-bold text-[#237b68]">
-            Fee: 20,000 lamports
+            Fee: 0.00002 SOL
           </span>
         </div>
 
         <p className="mt-2 text-[11px] leading-[1.6] text-[#556156]">
-          Normally scheduled every 12 hours by the permissionless keeper network. As vault curator, you can force an immediate rebalance now for demonstration, pulling the 20,000 lamport gas reimbursement from the vault tank.
+          Normally scheduled every 12 hours by the permissionless keeper network. As vault curator, you can force an immediate rebalance now for demonstration, pulling the 0.00002 SOL gas reimbursement from the vault tank.
         </p>
 
         {forceError && (
