@@ -5,12 +5,12 @@ import {money, shortAddress} from '@/lib/domain/format';
 import type {VaultView} from '@/lib/contracts/hooks';
 import {allocation} from './allocation';
 
-interface Props { vault: VaultView; index: number; selected: boolean; onSelect: () => void; }
+interface Props { vault: VaultView; index: number; }
 
-export function StrategyCard({vault, index, selected, onSelect}: Props) {
+export function StrategyCard({vault, index}: Props) {
   const slices = allocation(vault);
   return (
-    <article className={`group border-b border-[#cdd3ca] py-7 transition ${selected ? 'border-t border-t-[#2b3a30]' : ''}`}>
+    <article className="group border-b border-[#cdd3ca] py-7 transition">
       <div className="grid gap-5 sm:grid-cols-[36px_minmax(0,1fr)_auto] sm:items-start">
         <span className="hidden pt-1 text-[10px] font-bold text-[#848d85] sm:block">{String(index + 1).padStart(2, '0')}</span>
         <div className="min-w-0">
@@ -27,8 +27,7 @@ export function StrategyCard({vault, index, selected, onSelect}: Props) {
         <div className="grid min-w-[190px] grid-cols-2 gap-x-6 gap-y-4 sm:text-right">
           <Value label="Share price" value={vault.sharePriceUsd === null ? 'Unavailable' : money(Number(vault.sharePriceUsd))} />
           <Value label="Vault value" value={vault.totalValueUsd === null ? 'Unavailable' : money(Number(vault.totalValueUsd))} />
-          <button type="button" onClick={onSelect} className="folio-button-quiet min-h-0 py-1 text-[10px]">{selected ? 'Selected' : 'Select'}</button>
-          <Link href={`/vaults/${vault.address}`} className="folio-button-quiet min-h-0 py-1 text-[10px]">Details →</Link>
+          <Link href={`/vaults/${vault.address}`} className="folio-button-quiet col-span-2 min-h-0 justify-self-end py-1 text-[10px]">Details →</Link>
         </div>
       </div>
     </article>

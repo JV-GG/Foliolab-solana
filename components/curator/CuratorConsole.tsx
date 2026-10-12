@@ -4,6 +4,7 @@ import {useMemo, useState} from 'react';
 import {useConnection} from '@/lib/contracts/wallet';
 import {AnimatedBrandFooter} from '@/components/AnimatedBrandFooter';
 import {Header} from '@/components/Header';
+import {FolioSelect} from '@/components/FolioSelect';
 import {useVaults, type VaultView} from '@/lib/contracts/hooks';
 import {appChainLabel} from '@/lib/contracts/wallet';
 import {shortAddress} from '@/lib/domain/format';
@@ -19,6 +20,7 @@ import {VaultOverviewCard} from './VaultOverviewCard';
 
 type ManagerTab = 'plan' | 'rebalance' | 'activity';
 type MobileView = 'controls' | 'map';
+type CuratorVaultScope = 'all' | 'managed';
 
 export function CuratorConsole({artSample = false}: {artSample?: boolean} = {}) {
   const {address, isConnected} = useConnection();
@@ -27,10 +29,12 @@ export function CuratorConsole({artSample = false}: {artSample?: boolean} = {}) 
   const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
   const [managerTab, setManagerTab] = useState<ManagerTab>('plan');
   const [mobileView, setMobileView] = useState<MobileView>('map');
+  const [vaultScope, setVaultScope] = useState<CuratorVaultScope>('all');
   const [createOpen, setCreateOpen] = useState(false);
 
   const managed = useMemo(() => vaults.filter((vault) => sameAddress(vault.manager, address)).sort((left, right) => left.address.localeCompare(right.address)), [address, vaults]);
-  const selected = managed.find((vault) => vault.address === selectedAddress) ?? managed[0] ?? null;
+  const visibleVaults = vaultScope === 'managed' ? managed : vaults;
+  const selected = visibleVaults.find((vault) => vault.address === selectedAddress) ?? (vaultScope === 'all' ? managed[0] : null) ?? visibleVaults[0] ?? null;
   const managerAllowed = Boolean(address && selected && sameAddress(selected.manager, address));
 
   return (
@@ -50,7 +54,7 @@ export function CuratorConsole({artSample = false}: {artSample?: boolean} = {}) 
         <div className="grid min-h-[680px] gap-6 md:grid-cols-[370px_minmax(0,1fr)]">
           <aside className={`${mobileView === 'controls' ? 'flex' : 'hidden'} flex-col border border-[#c2c9c0] bg-[#f7f8f3]/60 md:flex`}>
             <div className="border-b border-[#cdd3ca] p-4">
-              <VaultPicker connected={isConnected} managed={managed} selected={selected} loading={isLoading} refreshing={isFetching} error={error instanceof Error ? error.message : null} onSelect={(next) => { setSelectedAddress(next); setManagerTab('plan'); }} onRefresh={() => void refetch()} />
+              <VaultPicker connected={isConnected} vaults={visibleVaults} scope={vaultScope} selected={selected} loading={isLoading} refreshing={isFetching} error={error instanceof Error ? error.message : null} onSelect={(next) => { setSelectedAddress(next); setManagerTab('plan'); }} onRefresh={() => void refetch()} />
             </div>
 
             <div className="flex-1">
@@ -76,13 +80,23 @@ export function CuratorConsole({artSample = false}: {artSample?: boolean} = {}) 
                   </div>
                 </>
               ) : (
-                <div className="grid min-h-full place-items-center p-8 text-center"><div><span className="font-editorial text-[52px] text-[#849087]">V</span><p className="font-editorial mt-3 text-[25px] font-medium">No managed vaults</p><p className="mt-3 text-[12px] leading-6 text-[#6b746c]">{isConnected ? 'This wallet does not manage a vault yet. Create one or refresh after it is indexed.' : 'Connect the manager wallet to load its vault islands.'}</p><button type="button" onClick={() => setCreateOpen(true)} className="folio-button-primary mt-6">Create investment pool</button></div></div>
+                <div className="grid min-h-full place-items-center p-8 text-center"><div><span className="font-editorial text-[52px] text-[#849087]">V</span><p className="font-editorial mt-3 text-[25px] font-medium">{vaultScope === 'managed' ? 'No managed vaults' : 'No vaults visible'}</p><p className="mt-3 text-[12px] leading-6 text-[#6b746c]">{vaultScope === 'managed' ? (isConnected ? 'This wallet does not manage a vault yet. Create one or refresh after it is indexed.' : 'Connect the manager wallet to load its managed vault islands.') : 'No curator vaults are currently available. Refresh after a vault is indexed.'}</p><button type="button" onClick={() => setCreateOpen(true)} className="folio-button-primary mt-6">Create investment pool</button></div></div>
               )}
             </div>
           </aside>
 
           <section className={`${mobileView === 'map' ? 'flex' : 'hidden'} map-frame relative h-[620px] flex-col md:flex md:h-auto md:min-h-[680px]`}>
-            <AssetMap vaults={managed} selectedAddress={selected?.address ?? null} connectedAddress={address} artSample={artSample} onSelect={(vault) => { setSelectedAddress(vault); setMobileView('controls'); }} />
+            <AssetMap
+              vaults={visibleVaults}
+              selectedAddress={selected?.address ?? null}
+              connectedAddress={address}
+              artSample={artSample}
+              sizeByValue
+              toolbar={<CuratorVaultScopeFilter scope={vaultScope} onChange={(scope) => { setVaultScope(scope); setSelectedAddress(null); }} />}
+              emptyTitle={vaultScope === 'managed' ? (isConnected ? 'NO_MANAGED_VAULTS' : 'CONNECT_MANAGER_WALLET') : 'NO_VAULTS_MAPPED'}
+              emptyDetail={vaultScope === 'managed' ? (isConnected ? 'CREATE A VAULT OR REFRESH AFTER INDEXING.' : 'CONNECT THE MANAGER WALLET TO VIEW MANAGED VAULTS.') : 'CREATE THE FIRST VAULT OR REFRESH AFTER INDEXING.'}
+              onSelect={(vault) => { setSelectedAddress(vault); setMobileView('controls'); }}
+            />
             {selected && <ActivityStrip vaultName={selected.name} vaultAddress={selected.address} onOpen={() => { setManagerTab('activity'); setMobileView('controls'); }} />}
           </section>
         </div>
@@ -97,14 +111,24 @@ export function CuratorConsole({artSample = false}: {artSample?: boolean} = {}) 
   );
 }
 
-interface VaultPickerProps { connected: boolean; managed: VaultView[]; selected: VaultView | null; loading: boolean; refreshing: boolean; error: string | null; onSelect: (address: string) => void; onRefresh: () => void; }
+interface VaultPickerProps { connected: boolean; vaults: VaultView[]; scope: CuratorVaultScope; selected: VaultView | null; loading: boolean; refreshing: boolean; error: string | null; onSelect: (address: string) => void; onRefresh: () => void; }
 
-function VaultPicker({connected, managed, selected, loading, refreshing, error, onSelect, onRefresh}: VaultPickerProps) {
-  const message = !connected ? 'Connect manager wallet' : error ? `Vault API unavailable: ${error}` : loading ? 'Loading managed vaults…' : managed.length === 0 ? 'No vaults managed by this wallet' : null;
+function VaultPicker({connected, vaults, scope, selected, loading, refreshing, error, onSelect, onRefresh}: VaultPickerProps) {
+  const scopeLabel = scope === 'managed' ? 'Managed vault' : 'All vaults';
+  const message = error ? `Vault API unavailable: ${error}` : loading ? 'Loading vaults…' : scope === 'managed' && !connected ? 'Connect manager wallet' : vaults.length === 0 ? (scope === 'managed' ? 'No vaults managed by this wallet' : 'No vaults available') : null;
   return (
     <div>
-      <div className="mb-2 flex items-center justify-between"><span className="eyebrow">Managed vault</span><button type="button" onClick={onRefresh} disabled={refreshing} className="folio-button-quiet min-h-0 px-2 py-1 text-[10px]">{refreshing ? 'Refreshing…' : 'Refresh'}</button></div>
-      {message ? <p className={`border-b border-[#cdd3ca] py-3 text-[11px] ${error ? 'text-[#a14343]' : 'text-[#6b746c]'}`} title={message}>{message}</p> : <select aria-label="Selected managed vault" value={selected?.address ?? ''} onChange={(event) => onSelect(event.target.value as string)} className="folio-field text-[12px] font-semibold">{managed.map((vault) => <option key={vault.address} value={vault.address}>{vault.name} ({vault.symbol})</option>)}</select>}
+      <div className="mb-2 flex items-center justify-between"><span className="eyebrow">{scopeLabel}</span><button type="button" onClick={onRefresh} disabled={refreshing} className="folio-button-quiet min-h-0 px-2 py-1 text-[10px]">{refreshing ? 'Refreshing…' : 'Refresh'}</button></div>
+      {message ? <p className={`border-b border-[#cdd3ca] py-3 text-[11px] ${error ? 'text-[#a14343]' : 'text-[#6b746c]'}`} title={message}>{message}</p> : <FolioSelect ariaLabel={`Selected ${scopeLabel.toLowerCase()}`} value={selected?.address ?? ''} onChange={onSelect} options={vaults.map((vault) => ({value: vault.address, label: `${vault.name} (${vault.symbol})`}))} className="text-[12px] font-semibold" />}
+    </div>
+  );
+}
+
+function CuratorVaultScopeFilter({scope, onChange}: {scope: CuratorVaultScope; onChange: (scope: CuratorVaultScope) => void}) {
+  return (
+    <div className="flex min-w-0 border border-[#46504c] bg-[#0a0e0d]" aria-label="Vault scope">
+      <button type="button" onClick={() => onChange('all')} className="h-10 whitespace-nowrap px-4 font-mono text-[13px] tracking-[0.12em] text-[#b8c0ba] transition-colors sm:text-[15px]" data-active={scope === 'all'} style={scope === 'all' ? {background: '#214e45', color: '#72f3d6'} : undefined}>All islands</button>
+      <button type="button" onClick={() => onChange('managed')} className="h-10 whitespace-nowrap border-l border-[#46504c] px-4 font-mono text-[13px] tracking-[0.12em] text-[#b8c0ba] transition-colors sm:text-[15px]" data-active={scope === 'managed'} style={scope === 'managed' ? {background: '#214e45', color: '#72f3d6'} : undefined}>Managed vaults</button>
     </div>
   );
 }
