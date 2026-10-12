@@ -138,6 +138,18 @@ export function explainError(error: unknown): string {
       return 'Post a plan before the first trade.';
     case 'ProposalAlreadyOpen':
       return 'This vault already has an on-chain proposal cycle active until voting concludes (on-chain rule: 1 proposal per vault at a time).';
+    case 'BuyNotUnderweight':
+      return 'The asset bought is already at or above its target weight on-chain.';
+    case 'SellNotOverweight':
+      return 'The asset sold is not above its target weight on-chain.';
+    case 'TargetOvershoot':
+      return 'This trade would overshoot the target weight on-chain.';
+    case 'RebalanceTooSoon':
+      return 'A rebalance cycle already ran in the last 12 hours.';
+    case 'GasTankEmpty':
+      return 'The vault’s gas tank cannot pay the keeper.';
+    case 'StrategyLocked':
+      return 'The strategy can only change through a passed proposal once the vault is active.';
     case null:
       break;
     default:

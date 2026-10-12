@@ -26,11 +26,11 @@ export async function GET(request: Request) {
       } catch {}
     }
     const vault = await readVault(vaultParam);
-    const recommendation = evaluateRebalance(vault, force, customTargets);
+    const recommendation = evaluateRebalance(vault, force, customTargets ?? vault.onChainTargets);
     return Response.json({
       vault: vault.address,
       state: vault.state,
-      targets: customTargets ?? vault.targets,
+      targets: customTargets ?? vault.onChainTargets ?? vault.targets,
       gasTankLamports: vault.gasTankLamports,
       recommendation,
     });

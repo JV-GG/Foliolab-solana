@@ -90,6 +90,7 @@ export interface VaultView {
   /** V2 Governance and autonomous keeper fields */
   gasTankLamports: string;
   targets: TargetWeight[];
+  onChainTargets?: TargetWeight[];
   openProposal: ProposalView | null;
   cycleStart: number;
   rebalanceIntervalSeconds: number;
@@ -170,9 +171,8 @@ export async function readVault(vaultParam: string, account?: PublicKey, prices?
     };
   }
 
-  // V2 Strategy targets (incorporates adopted amendment if approved)
-  const adopted = getAdoptedStrategy(address.toBase58());
-  const targets: TargetWeight[] = adopted?.targets ?? (v.targets ?? []).map((t) => {
+  // V2 Strategy targets
+  const onChainTargets: TargetWeight[] = (v.targets ?? []).map((t) => {
     const asset = t.mint.toBase58();
     const info = tokenByMint(asset);
     return {
@@ -182,6 +182,8 @@ export async function readVault(vaultParam: string, account?: PublicKey, prices?
       targetPercent: t.bps / 100,
     };
   });
+  const adopted = getAdoptedStrategy(address.toBase58());
+  const targets: TargetWeight[] = adopted?.targets ?? onChainTargets;
 
   // V2 Open Proposal
   let openProposal: ProposalView | null = null;
@@ -287,6 +289,7 @@ export async function readVault(vaultParam: string, account?: PublicKey, prices?
     pricedAt: Date.now(),
     gasTankLamports: v.gasTank ? v.gasTank.toString() : '0',
     targets,
+    onChainTargets,
     openProposal,
     cycleStart: v.cycleStart ? v.cycleStart.toNumber() : 0,
     rebalanceIntervalSeconds: REBALANCE_INTERVAL_SECONDS,

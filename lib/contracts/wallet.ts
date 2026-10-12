@@ -6,6 +6,7 @@
  */
 import {useConnection as useSolanaConnection, useWallet} from '@solana/wallet-adapter-react';
 import {
+  Connection,
   PublicKey,
   Transaction,
   TransactionMessage,
@@ -20,6 +21,48 @@ export const appChainLabel =
   CLUSTER === 'mainnet-beta' ? 'Solana' : CLUSTER === 'devnet' ? 'Solana devnet' : 'Local Solana validator';
 export const isTestCluster = CLUSTER !== 'mainnet-beta';
 export {explorerUrl};
+
+async function extractTxError(
+  err: any,
+  tx: Transaction | VersionedTransaction | null | undefined,
+  connection: Connection,
+): Promise<never> {
+  const logs = err?.logs || err?.error?.logs;
+  if (logs && Array.isArray(logs)) {
+    const anchorErr = logs.find((l: string) => l.includes('Error Message:'));
+    if (anchorErr) {
+      throw new Error(anchorErr.replace(/^.*Error Message:\s*/, ''));
+    }
+    const codeErr = logs.find((l: string) => l.includes('Error Code:'));
+    if (codeErr) {
+      throw new Error(codeErr.replace(/^.*Error Code:\s*/, ''));
+    }
+  }
+  if (tx) {
+    try {
+      const sim = await connection.simulateTransaction(tx as any);
+      const simLogs = sim?.value?.logs || [];
+      const anchorErr = simLogs.find((l: string) => l.includes('Error Message:'));
+      if (anchorErr) {
+        throw new Error(anchorErr.replace(/^.*Error Message:\s*/, ''));
+      }
+      const codeErr = simLogs.find((l: string) => l.includes('Error Code:'));
+      if (codeErr) {
+        throw new Error(codeErr.replace(/^.*Error Code:\s*/, ''));
+      }
+    } catch (simErr: any) {
+      const simLogs = simErr?.logs || simErr?.error?.logs || [];
+      const anchorErr = simLogs.find((l: string) => l.includes('Error Message:'));
+      if (anchorErr) {
+        throw new Error(anchorErr.replace(/^.*Error Message:\s*/, ''));
+      }
+      if (simErr.message && !simErr.message.includes('Unexpected error')) {
+        throw simErr;
+      }
+    }
+  }
+  throw err;
+}
 
 /** The connected wallet, in the shape the components already use. */
 export function useConnection(): {address: string | undefined; isConnected: boolean} {
@@ -84,44 +127,14 @@ export function useSendTransaction() {
       try {
         signature = await sendTransaction(tx!, connection, {preflightCommitment: 'confirmed'});
       } catch (err: any) {
-        const logs = err?.logs || err?.error?.logs;
-        if (logs && Array.isArray(logs)) {
-          const anchorErr = logs.find((l: string) => l.includes('Error Message:'));
-          if (anchorErr) {
-            throw new Error(anchorErr.replace(/^.*Error Message:\s*/, ''));
-          }
-        }
-        if (tx) {
-          try {
-            const sim = await connection.simulateTransaction(tx as any);
-            const logs = sim?.value?.logs || [];
-            const anchorErr = logs.find((l: string) => l.includes('Error Message:'));
-            if (anchorErr) {
-              throw new Error(anchorErr.replace(/^.*Error Message:\s*/, ''));
-            }
-            const codeErr = logs.find((l: string) => l.includes('Error Code:'));
-            if (codeErr) {
-              throw new Error(codeErr.replace(/^.*Error Code:\s*/, ''));
-            }
-          } catch (simErr: any) {
-            const logs = simErr?.logs || simErr?.error?.logs || [];
-            const anchorErr = logs.find((l: string) => l.includes('Error Message:'));
-            if (anchorErr) {
-              throw new Error(anchorErr.replace(/^.*Error Message:\s*/, ''));
-            }
-            if (simErr.message && !simErr.message.includes('Unexpected error')) {
-              throw simErr;
-            }
-          }
-        }
-        throw err;
+        await extractTxError(err, tx, connection);
       }
       const result = await connection.confirmTransaction(
-        {signature, blockhash, lastValidBlockHeight},
+        {signature: signature!, blockhash, lastValidBlockHeight},
         'confirmed',
       );
       if (result.value.err) throw new Error(`The transaction failed on-chain: ${JSON.stringify(result.value.err)}`);
-      return signature;
+      return signature!;
     },
     [connection, publicKey, sendTransaction],
   );
@@ -173,20 +186,29 @@ export function useSendMultipleTransactions() {
         const signedList = await signAllTransactions(txList);
         for (const signedTx of signedList) {
           let sig: string;
-          if (signedTx instanceof VersionedTransaction) {
-            sig = await connection.sendTransaction(signedTx, {preflightCommitment: 'confirmed'});
-          } else {
-            sig = await connection.sendRawTransaction(signedTx.serialize(), {preflightCommitment: 'confirmed'});
+          try {
+            if (signedTx instanceof VersionedTransaction) {
+              sig = await connection.sendTransaction(signedTx, {preflightCommitment: 'confirmed'});
+            } else {
+              sig = await connection.sendRawTransaction(signedTx.serialize(), {preflightCommitment: 'confirmed'});
+            }
+          } catch (err: any) {
+            await extractTxError(err, signedTx, connection);
           }
-          await connection.confirmTransaction({signature: sig, blockhash, lastValidBlockHeight}, 'confirmed');
-          signatures.push(sig);
+          await connection.confirmTransaction({signature: sig!, blockhash, lastValidBlockHeight}, 'confirmed');
+          signatures.push(sig!);
         }
       } else {
         // Single transaction or fallback
         for (const tx of txList) {
-          const sig = await sendTransaction(tx, connection, {preflightCommitment: 'confirmed'});
-          await connection.confirmTransaction({signature: sig, blockhash, lastValidBlockHeight}, 'confirmed');
-          signatures.push(sig);
+          let sig: string;
+          try {
+            sig = await sendTransaction(tx, connection, {preflightCommitment: 'confirmed'});
+          } catch (err: any) {
+            await extractTxError(err, tx, connection);
+          }
+          await connection.confirmTransaction({signature: sig!, blockhash, lastValidBlockHeight}, 'confirmed');
+          signatures.push(sig!);
         }
       }
 
