@@ -37,7 +37,7 @@ export type {VaultView, Holding} from '@/lib/vaults/read';
 export const VAULTS_KEY = 'vaults';
 const SYSVAR_INSTRUCTIONS = new PublicKey('Sysvar1nstructions1111111111111111111111111');
 
-/** All vaults, with the connected wallet's position in each. Refreshes every 15 s. */
+/** All vaults, with the connected wallet's position in each. Refreshes every 20 s. */
 export function useVaults() {
   const {address} = useConnection();
   return useQuery({
@@ -48,7 +48,7 @@ export function useVaults() {
       if (!res.ok) throw new Error(body.error ?? 'Could not load vaults');
       return body.vaults;
     },
-    refetchInterval: 15_000,
+    refetchInterval: 20_000,
   });
 }
 

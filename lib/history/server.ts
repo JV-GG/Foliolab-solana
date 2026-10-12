@@ -10,7 +10,7 @@ import {formatUnits} from '@/lib/domain/format';
 import {resolveToken} from './tokenMetadata';
 import type {ActivityItem, HistoryResponse} from './types';
 
-const SIGNATURES_PER_VAULT = 40;
+const SIGNATURES_PER_VAULT = 20;
 
 interface VaultInfo {
   address: string;
