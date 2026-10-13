@@ -28,5 +28,17 @@
     ],
     "plan": "V1: 10% Cash, 30% APPLE, 30% NVIDEA, 30% TESLA",
     "timestamp": 1791828396779
+  },
+  "5ojjqf4ysx7fdkipd7pngcys1txpgcufqj4qxybgwef6": {
+    "targets": [
+      {
+        "asset": "DKg3JGudRDDWymeLhWVEjhfagNGi93SGYdRb7A8TuHdv",
+        "symbol": "USDC",
+        "targetBps": 10000,
+        "targetPercent": 100
+      }
+    ],
+    "plan": "[LIQUIDATION] Emergency liquidation to 100% USDC and vault closure. All positions will be converted to USDC cash.",
+    "timestamp": 1791869734765
   }
 }

@@ -75,30 +75,58 @@ export function evaluateRebalance(
     return {eligible: false, reason: 'Total vault value is 0 or unavailable'};
   }
 
-  let mostOverweight = {asset: '', symbol: '', driftBps: 0, excessUsd: 0, decimals: 6};
+  let mostOverweight = {asset: '', symbol: '', driftBps: 0, excessUsd: 0, decimals: 6, targetBps: 0};
   let mostUnderweight = {asset: '', symbol: '', driftBps: 0, deficitUsd: 0};
   const threshold = ignoreCooldown ? 0 : DRIFT_BAND_BPS;
 
+  // Build a complete map of all candidate assets: targets + all non-zero holdings in vault
+  const assetMap = new Map<string, {targetBps: number; symbol: string; decimals?: number; holding?: (typeof vault.holdings)[number]}>();
+
   for (const target of targets) {
-    const holding = vault.holdings.find((h) => h.asset === target.asset);
+    assetMap.set(target.asset, {
+      targetBps: target.targetBps,
+      symbol: target.symbol,
+    });
+  }
+
+  for (const holding of vault.holdings) {
+    if (BigInt(holding.amount) > BigInt(0)) {
+      const existing = assetMap.get(holding.asset);
+      if (existing) {
+        existing.holding = holding;
+        existing.decimals = holding.decimals;
+      } else {
+        assetMap.set(holding.asset, {
+          targetBps: 0,
+          symbol: holding.symbol,
+          decimals: holding.decimals,
+          holding,
+        });
+      }
+    }
+  }
+
+  for (const [asset, item] of assetMap.entries()) {
+    const holding = item.holding ?? vault.holdings.find((h) => h.asset === asset);
     const valueUsd = holding?.valueUsd ? Number(holding.valueUsd) : 0;
     const currentBps = Math.floor((valueUsd / totalValue) * 10000);
-    const driftBps = currentBps - target.targetBps;
+    const driftBps = currentBps - item.targetBps;
 
     if (driftBps > threshold && driftBps > mostOverweight.driftBps) {
       const excessUsd = (driftBps / 10000) * totalValue;
       mostOverweight = {
-        asset: target.asset,
-        symbol: target.symbol,
+        asset,
+        symbol: item.symbol,
         driftBps,
         excessUsd,
-        decimals: holding?.decimals ?? 6,
+        decimals: holding?.decimals ?? item.decimals ?? 6,
+        targetBps: item.targetBps,
       };
     } else if (driftBps < -threshold && driftBps < mostUnderweight.driftBps) {
       const deficitUsd = (Math.abs(driftBps) / 10000) * totalValue;
       mostUnderweight = {
-        asset: target.asset,
-        symbol: target.symbol,
+        asset,
+        symbol: item.symbol,
         driftBps,
         deficitUsd,
       };
@@ -122,7 +150,11 @@ export function evaluateRebalance(
   const holding = vault.holdings.find((h) => h.asset === mostOverweight.asset);
   const priceUsd = holding?.priceUsd ? Number(holding.priceUsd) : 1;
   const tokenAmount = tradeSizeUsd / priceUsd;
-  const rawSellUnits = BigInt(Math.max(1, Math.floor(tokenAmount * 10 ** mostOverweight.decimals))).toString();
+  // If targetBps is 0 (completely liquidating this asset), sell 100% of holding.amount to avoid fractional dust
+  const rawSellUnits =
+    mostOverweight.targetBps === 0 && holding
+      ? holding.amount
+      : BigInt(Math.max(1, Math.floor(tokenAmount * 10 ** mostOverweight.decimals))).toString();
 
   return {
     eligible: true,
@@ -169,9 +201,10 @@ async function sendRebalanceTx(
 ): Promise<string> {
   const bh = await conn.getLatestBlockhash('confirmed');
   let txToSimulate: VersionedTransaction | Transaction;
+  const effectiveAltAddress = altAddress || deployment().lookupTable;
 
-  if (altAddress) {
-    const altAccount = (await conn.getAddressLookupTable(new PublicKey(altAddress))).value;
+  if (effectiveAltAddress) {
+    const altAccount = (await conn.getAddressLookupTable(new PublicKey(effectiveAltAddress))).value;
     if (altAccount) {
       const messageV0 = new TransactionMessage({
         payerKey: keeper.publicKey,
@@ -265,15 +298,16 @@ export async function executeRebalanceCrank(
   const altAddress = d.lookupTable;
   const executedTrades: CrankTradeResult[] = [];
 
-  // Save gas fees: rebalance the most significant drifts and avoid wasting transactions on dust
-  for (let step = 0; step < 2; step++) {
+  // Execute up to 6 rebalancing steps so all holdings can be liquidated in 1 click
+  const maxSteps = customTargets ? 6 : 4;
+  for (let step = 0; step < maxSteps; step++) {
     const vaultView = await readVault(vaultAddress);
     const rec = evaluateRebalance(vaultView, force || step > 0, customTargets);
     if (!rec.eligible || !rec.overweightAsset || !rec.underweightAsset || !rec.suggestedSellAmount) {
       break;
     }
-    // If trade amount is negligible dust (< 1 USDC), stop to save gas fees
-    if (BigInt(rec.suggestedSellAmount) < BigInt(1_000_000)) {
+    // If trade amount is negligible dust and not custom liquidating, stop to save gas fees
+    if (!customTargets && BigInt(rec.suggestedSellAmount) < BigInt(10_000)) {
       break;
     }
 

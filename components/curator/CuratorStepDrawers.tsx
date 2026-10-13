@@ -9,7 +9,7 @@ import {explainError, useOnChainTokens, VAULTS_KEY, type VaultView} from '@/lib/
 import type {TargetWeight} from '@/lib/vaults/read';
 import {deployment, explorerUrl} from '@/lib/solana/config';
 import {formatSol, tokenAmount} from '@/lib/domain/format';
-import {MAX_PLAN_BYTES, utf8ByteLength} from './model';
+import {MAX_PLAN_BYTES, utf8ByteLength, sameAddress} from './model';
 import {useCuratorActions} from './useCuratorActions';
 import {assetColor, assetMix, SHARE_SCALE, sharePartsPerMillion} from './capitalMapModel';
 import {useTokenSymbols} from './useTokenSymbols';
@@ -434,6 +434,19 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
         }
         setIsProposalClosedLocally(true);
 
+        // Update on-chain targets so on-chain rebalancing constraints match the approved proposal
+        if (targets && targets.length > 0) {
+          try {
+            await setStrategy(
+              vault.address,
+              plan || 'Adopted Strategy',
+              targets.map((t) => ({mint: new PublicKey(t.asset), targetBps: t.targetBps})),
+            );
+          } catch (stratErr) {
+            console.warn('Strategy on-chain update note:', stratErr);
+          }
+        }
+
         try {
           await forceRebalance(vault, targets);
         } catch (rebErr) {
@@ -590,6 +603,25 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
           targetPercent: 100,
         },
       ];
+
+      // 1. Ensure on-chain strategy is set to 100% USDC liquidation so the Solana program permits buying USDC
+      const isAlready100Usdc =
+        vault.onChainTargets &&
+        vault.onChainTargets.length === 1 &&
+        sameAddress(vault.onChainTargets[0].asset, usdcAsset) &&
+        vault.onChainTargets[0].targetBps === 10000;
+
+      if (!isAlready100Usdc) {
+        notify('Adopting 100% USDC liquidation strategy on-chain…');
+        await setStrategy(
+          vault.address,
+          '100% USDC Liquidation: Portfolio converted to cash.',
+          [{mint: new PublicKey(usdcAsset), targetBps: 10000}],
+        );
+      }
+
+      // 2. Execute liquidation swaps into USDC
+      notify('Executing liquidation swaps into USDC…');
       const res = await forceRebalance(vault, usdcTargets);
       const count = res.trades?.length ?? 1;
       notify(`Liquidation rebalance executed! ${count} trade${count > 1 ? 's' : ''} confirmed. Vault portfolio converted to USDC.`);
