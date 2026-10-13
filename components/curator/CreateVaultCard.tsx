@@ -189,8 +189,155 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
             </span>
           </div>
 
-          {/* Search input container that triggers pop-up sliding dropdown */}
+          {/* Search input container with pop-up sliding dropdown positioned ABOVE */}
           <div className="relative">
+            {/* Pop-up Sliding Dropdown Panel (Positioned ABOVE the search bar) */}
+            {dropdownOpen && (
+              <div className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-50 space-y-3 rounded-2xl border border-[#cdd3ca] bg-white p-3.5 shadow-2xl transition-all duration-150 animate-in fade-in slide-in-from-bottom-2">
+                {/* Filter Tabs & Close Button */}
+                <div className="flex items-center justify-between gap-2 border-b border-[#edf1eb] pb-2.5">
+                  <div className="flex items-center gap-1.5 overflow-x-auto text-[10px] font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => setFilterTab('all')}
+                      className={`rounded-lg px-2.5 py-1 transition-all ${
+                        filterTab === 'all'
+                          ? 'bg-[#237b68] text-white shadow-2xs'
+                          : 'bg-[#f0f4ee] text-[#59645c] hover:bg-[#e4ece2]'
+                      }`}
+                    >
+                      All ({availableTokens.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFilterTab('rwa')}
+                      className={`rounded-lg px-2.5 py-1 transition-all ${
+                        filterTab === 'rwa'
+                          ? 'bg-[#237b68] text-white shadow-2xs'
+                          : 'bg-[#f0f4ee] text-[#59645c] hover:bg-[#e4ece2]'
+                      }`}
+                    >
+                      RWA Stocks ({rwaCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFilterTab('crypto')}
+                      className={`rounded-lg px-2.5 py-1 transition-all ${
+                        filterTab === 'crypto'
+                          ? 'bg-[#237b68] text-white shadow-2xs'
+                          : 'bg-[#f0f4ee] text-[#59645c] hover:bg-[#e4ece2]'
+                      }`}
+                    >
+                      Crypto ({cryptoCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFilterTab('selected')}
+                      className={`rounded-lg px-2.5 py-1 transition-all ${
+                        filterTab === 'selected'
+                          ? 'bg-[#237b68] text-white shadow-2xs'
+                          : 'bg-[#f0f4ee] text-[#59645c] hover:bg-[#e4ece2]'
+                      }`}
+                    >
+                      Picked ({selectedMints.length})
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setDropdownOpen(false)}
+                    className="rounded-md p-1 font-mono text-[11px] font-bold text-[#717b72] hover:bg-[#f0f4ee] hover:text-[#2b3a30]"
+                    title="Close popup"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* 3-Column Grid inside the popup */}
+                <div className="max-h-52 overflow-y-auto rounded-xl border border-[#e5ebe3] bg-[#fcfdfa] p-2">
+                  {filteredTokens.length === 0 ? (
+                    <div className="p-4 text-center text-[11px] text-[#717b72]">
+                      {filterTab === 'selected'
+                        ? 'No assets selected yet. Switch to "All" to pick assets.'
+                        : 'No matching asset found.'}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {filteredTokens.map((token) => {
+                        const isSelected = selectedMints.includes(token.mint);
+                        const isCrypto = token.category === 'crypto';
+                        return (
+                          <button
+                            key={token.mint}
+                            type="button"
+                            onClick={() => toggleToken(token.mint)}
+                            disabled={busy}
+                            title={token.name}
+                            className={`flex items-center justify-between rounded-lg px-2.5 py-2 text-left font-mono text-[12px] font-semibold transition-all border ${
+                              isSelected
+                                ? 'border-[#237b68] bg-[#edf6f2] text-[#185347] shadow-2xs ring-1 ring-[#237b68]/40'
+                                : 'border-[#e2e7df] bg-white text-[#2b3a30] hover:border-[#237b68]/40 hover:bg-[#fbfcfb]'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span
+                                className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                                  isCrypto ? 'bg-[#9945FF]' : 'bg-[#237b68]'
+                                }`}
+                              />
+                              <span className="truncate">{token.symbol}</span>
+                            </div>
+                            <span
+                              className={`ml-1 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full text-[8px] font-bold ${
+                                isSelected
+                                  ? 'bg-[#237b68] text-white'
+                                  : 'border border-[#cdd3ca] text-transparent'
+                              }`}
+                            >
+                              ✓
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Popup Action Footer */}
+                <div className="flex items-center justify-between pt-1 text-[10px]">
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleAddAll}
+                      disabled={busy || selectedMints.length === availableTokens.length}
+                      className="text-[#237b68] underline hover:text-[#185347] disabled:opacity-40"
+                    >
+                      + Select all ({availableTokens.length})
+                    </button>
+                    {selectedMints.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearAll}
+                        disabled={busy}
+                        className="text-[#a14343] hover:underline"
+                      >
+                        Clear all
+                      </button>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setDropdownOpen(false)}
+                    className="rounded-lg bg-[#237b68] px-3.5 py-1.5 font-mono text-[10px] font-semibold text-white shadow-2xs hover:bg-[#1b6152]"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* The Search Input Field */}
             <input
               type="text"
               value={search}
@@ -218,152 +365,6 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
               </span>
             </button>
           </div>
-
-          {/* Pop-up Sliding Dropdown Panel */}
-          {dropdownOpen && (
-            <div className="absolute top-[calc(100%+6px)] left-0 right-0 z-40 space-y-3 rounded-2xl border border-[#cdd3ca] bg-white p-3.5 shadow-xl transition-all duration-150 animate-in fade-in slide-in-from-top-2">
-              {/* Filter Tabs & Close Button */}
-              <div className="flex items-center justify-between gap-2 border-b border-[#edf1eb] pb-2.5">
-                <div className="flex items-center gap-1.5 overflow-x-auto text-[10px] font-semibold">
-                  <button
-                    type="button"
-                    onClick={() => setFilterTab('all')}
-                    className={`rounded-lg px-2.5 py-1 transition-all ${
-                      filterTab === 'all'
-                        ? 'bg-[#237b68] text-white shadow-2xs'
-                        : 'bg-[#f0f4ee] text-[#59645c] hover:bg-[#e4ece2]'
-                    }`}
-                  >
-                    All ({availableTokens.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFilterTab('rwa')}
-                    className={`rounded-lg px-2.5 py-1 transition-all ${
-                      filterTab === 'rwa'
-                        ? 'bg-[#237b68] text-white shadow-2xs'
-                        : 'bg-[#f0f4ee] text-[#59645c] hover:bg-[#e4ece2]'
-                    }`}
-                  >
-                    RWA Stocks ({rwaCount})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFilterTab('crypto')}
-                    className={`rounded-lg px-2.5 py-1 transition-all ${
-                      filterTab === 'crypto'
-                        ? 'bg-[#237b68] text-white shadow-2xs'
-                        : 'bg-[#f0f4ee] text-[#59645c] hover:bg-[#e4ece2]'
-                    }`}
-                  >
-                    Crypto ({cryptoCount})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFilterTab('selected')}
-                    className={`rounded-lg px-2.5 py-1 transition-all ${
-                      filterTab === 'selected'
-                        ? 'bg-[#237b68] text-white shadow-2xs'
-                        : 'bg-[#f0f4ee] text-[#59645c] hover:bg-[#e4ece2]'
-                    }`}
-                  >
-                    Picked ({selectedMints.length})
-                  </button>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setDropdownOpen(false)}
-                  className="rounded-md p-1 font-mono text-[11px] font-bold text-[#717b72] hover:bg-[#f0f4ee] hover:text-[#2b3a30]"
-                  title="Close popup"
-                >
-                  ✕
-                </button>
-              </div>
-
-              {/* 3-Column Grid inside the popup */}
-              <div className="max-h-56 overflow-y-auto rounded-xl border border-[#e5ebe3] bg-[#fcfdfa] p-2">
-                {filteredTokens.length === 0 ? (
-                  <div className="p-4 text-center text-[11px] text-[#717b72]">
-                    {filterTab === 'selected'
-                      ? 'No assets selected yet. Switch to "All" to pick assets.'
-                      : 'No matching asset found.'}
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {filteredTokens.map((token) => {
-                      const isSelected = selectedMints.includes(token.mint);
-                      const isCrypto = token.category === 'crypto';
-                      return (
-                        <button
-                          key={token.mint}
-                          type="button"
-                          onClick={() => toggleToken(token.mint)}
-                          disabled={busy}
-                          title={token.name}
-                          className={`flex items-center justify-between rounded-lg px-2.5 py-2 text-left font-mono text-[12px] font-semibold transition-all border ${
-                            isSelected
-                              ? 'border-[#237b68] bg-[#edf6f2] text-[#185347] shadow-2xs ring-1 ring-[#237b68]/40'
-                              : 'border-[#e2e7df] bg-white text-[#2b3a30] hover:border-[#237b68]/40 hover:bg-[#fbfcfb]'
-                          }`}
-                        >
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <span
-                              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                                isCrypto ? 'bg-[#9945FF]' : 'bg-[#237b68]'
-                              }`}
-                            />
-                            <span className="truncate">{token.symbol}</span>
-                          </div>
-                          <span
-                            className={`ml-1 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full text-[8px] font-bold ${
-                              isSelected
-                                ? 'bg-[#237b68] text-white'
-                                : 'border border-[#cdd3ca] text-transparent'
-                            }`}
-                          >
-                            ✓
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Popup Action Footer */}
-              <div className="flex items-center justify-between pt-1 text-[10px]">
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={handleAddAll}
-                    disabled={busy || selectedMints.length === availableTokens.length}
-                    className="text-[#237b68] underline hover:text-[#185347] disabled:opacity-40"
-                  >
-                    + Select all ({availableTokens.length})
-                  </button>
-                  {selectedMints.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleClearAll}
-                      disabled={busy}
-                      className="text-[#a14343] hover:underline"
-                    >
-                      Clear all
-                    </button>
-                  )}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setDropdownOpen(false)}
-                  className="rounded-lg bg-[#237b68] px-3.5 py-1.5 font-mono text-[10px] font-semibold text-white shadow-2xs hover:bg-[#1b6152]"
-                >
-                  Done
-                </button>
-              </div>
-            </div>
-          )}
 
           {/* Selected Asset Chips displayed directly in the column below search bar */}
           <div className="mt-1 space-y-1.5">
