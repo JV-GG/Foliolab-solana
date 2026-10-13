@@ -21,7 +21,6 @@ const DESKTOP_VIEW_WIDTH = 1080;
 const ART_SIZE = 430;
 const MIN_VALUE_ART_SIZE = 270;
 const SAMPLE_SIZE = 500;
-const MAX_COLUMNS = 2;
 const ART_VARIANTS = [
   {image: sampleIsland.src, mask: sampleMask.src},
   {image: crescentIsland.src, mask: crescentMask.src},
@@ -102,16 +101,73 @@ export function AssetMap({
   const visibleVaults = singleIsland
     ? vaults.filter((vault) => vault.address === selectedAddress).slice(0, 1)
     : vaults;
-  const columns = singleIsland || compact ? 1 : Math.min(MAX_COLUMNS, Math.max(1, visibleVaults.length));
-  const rows = Math.max(1, Math.ceil(visibleVaults.length / columns));
-  const viewWidth = compact ? 620 : DESKTOP_VIEW_WIDTH;
-  const viewHeight = singleIsland
-    ? 630
-    : compact
-      ? Math.max(560, 30 + rows * 480)
-      : Math.max(620, 50 + rows * 480);
-  const detailScale = singleIsland ? 1 : Math.min(1.9, 1 + Math.max(0, rows - 1) * 0.45);
   const maxVaultValue = Math.max(0, ...visibleVaults.map(vaultValue));
+
+  // 360-degree radial archipelago layout: index 0 at center, new islands expand 360° outward
+  const layout = useMemo(() => {
+    if (visibleVaults.length === 0) {
+      return {
+        viewWidth: compact ? 620 : DESKTOP_VIEW_WIDTH,
+        viewHeight: 630,
+        positions: [] as {x: number; y: number; size: number}[],
+        detailScale: 1,
+      };
+    }
+
+    if (singleIsland || visibleVaults.length === 1) {
+      const size = singleIsland
+        ? SAMPLE_SIZE
+        : sizeByValue
+          ? valueScaledIslandSize(visibleVaults[0], maxVaultValue)
+          : ART_SIZE;
+      const w = compact ? 620 : DESKTOP_VIEW_WIDTH;
+      const h = compact ? 560 : 630;
+      return {
+        viewWidth: w,
+        viewHeight: h,
+        positions: [{
+          x: Math.round(w / 2 - size / 2),
+          y: Math.round(h / 2 - size / 2),
+          size,
+        }],
+        detailScale: 1,
+      };
+    }
+
+    const sizes = visibleVaults.map((vault) =>
+      sizeByValue ? valueScaledIslandSize(vault, maxVaultValue) : ART_SIZE,
+    );
+    const offsets = visibleVaults.map((_, i) => getArchipelagoOffset(i));
+
+    const minX = Math.min(...offsets.map((p, i) => p.x - sizes[i] / 2));
+    const maxX = Math.max(...offsets.map((p, i) => p.x + sizes[i] / 2));
+    const minY = Math.min(...offsets.map((p, i) => p.y - sizes[i] / 2));
+    const maxY = Math.max(...offsets.map((p, i) => p.y + sizes[i] / 2));
+
+    const archWidth = maxX - minX;
+    const archHeight = maxY - minY;
+    const archCenterX = (minX + maxX) / 2;
+    const archCenterY = (minY + maxY) / 2;
+
+    const pad = compact ? 110 : 160;
+    const viewWidth = Math.max(compact ? 680 : DESKTOP_VIEW_WIDTH, Math.round(archWidth + pad * 2));
+    const viewHeight = Math.max(compact ? 560 : 680, Math.round(archHeight + pad * 2));
+
+    const centerX = viewWidth / 2;
+    const centerY = viewHeight / 2;
+
+    const positions = visibleVaults.map((_, i) => ({
+      x: Math.round(centerX + offsets[i].x - archCenterX - sizes[i] / 2),
+      y: Math.round(centerY + offsets[i].y - archCenterY - sizes[i] / 2),
+      size: sizes[i],
+    }));
+
+    const ringCount = Math.max(1, Math.ceil(Math.max(archWidth, archHeight) / 1000));
+    const detailScale = Math.min(1.6, 1 + (ringCount - 1) * 0.25);
+
+    return {viewWidth, viewHeight, positions, detailScale};
+  }, [visibleVaults, singleIsland, sizeByValue, maxVaultValue, compact]);
+
   const selectedVault = visibleVaults.find((vault) => vault.address === selectedAddress) ?? visibleVaults[0] ?? null;
 
   function resetView() {
@@ -132,8 +188,8 @@ export function AssetMap({
       startX: event.clientX,
       startY: event.clientY,
       startPan: pan,
-      unitsX: viewWidth / bounds.width,
-      unitsY: viewHeight / bounds.height,
+      unitsX: layout.viewWidth / bounds.width,
+      unitsY: layout.viewHeight / bounds.height,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
   }
@@ -191,7 +247,7 @@ export function AssetMap({
           <EmptyMap title={emptyTitle} detail={emptyDetail} />
         ) : (
           <svg
-            viewBox={`0 0 ${viewWidth} ${viewHeight}`}
+            viewBox={`0 0 ${layout.viewWidth} ${layout.viewHeight}`}
             className="h-full w-full touch-none select-none"
             role="img"
             aria-label="Interactive map of managed vault islands"
@@ -225,20 +281,13 @@ export function AssetMap({
                 </feComponentTransfer>
               </filter>
             </defs>
-            <rect width={viewWidth} height={viewHeight} fill="url(#ocean-pixels)" />
-            <rect width={viewWidth} height={viewHeight} fill="url(#ascii-field)" />
-            <OceanTexture width={viewWidth} height={viewHeight} />
+            <rect width={layout.viewWidth} height={layout.viewHeight} fill="url(#ocean-pixels)" />
+            <rect width={layout.viewWidth} height={layout.viewHeight} fill="url(#ascii-field)" />
+            <OceanTexture width={layout.viewWidth} height={layout.viewHeight} />
             <g transform={`translate(${pan.x} ${pan.y}) scale(${zoom})`}>
               {visibleVaults.map((vault, index) => {
-                const slotWidth = viewWidth / columns;
-                const size = singleIsland
-                  ? SAMPLE_SIZE
-                  : sizeByValue
-                    ? valueScaledIslandSize(vault, maxVaultValue)
-                    : ART_SIZE;
-                const x = index % columns * slotWidth + (slotWidth - size) / 2;
-                const rowTop = (singleIsland ? 15 : 25) + Math.floor(index / columns) * 480;
-                const y = rowTop + (singleIsland ? 0 : ART_SIZE - size);
+                const pos = layout.positions[index] ?? {x: 0, y: 0, size: ART_SIZE};
+                const {x, y, size} = pos;
                 const variant = singleIsland ? ART_VARIANTS[0] : ART_VARIANTS[hashString(vault.address.toLowerCase()) % ART_VARIANTS.length];
                 return (
                   <ArtVaultIsland
@@ -255,7 +304,7 @@ export function AssetMap({
                     showAssets={mapView === 'distribution'}
                     showTerritories={showTerritories}
                     hoveredAssetAddress={hoveredAsset?.address ?? null}
-                    detailScale={detailScale}
+                    detailScale={layout.detailScale}
                     onSelect={() => selectVault(vault.address)}
                     onTerritory={(holder) => {
                       selectVault(vault.address);
@@ -506,6 +555,44 @@ function MapLegend({vault, mapView, showTerritories, demo, sizeByValue}: {vault:
       <span className="ml-auto">{demo ? 'Static visual demo · no transactions' : sizeByValue ? 'Island area follows vault value · minimum display size applied' : 'Island size and terrain are decorative · not TVL or yield'}</span>
     </div>
   );
+}
+
+/**
+ * 360-degree radial archipelago placement.
+ * Index 0 sits in the center (0, 0).
+ * Successive islands radiate outward in concentric rings, alternating opposing sides
+ * so the archipelago expands evenly across all directions (360 degrees).
+ */
+function getArchipelagoOffset(index: number): {x: number; y: number} {
+  if (index === 0) return {x: 0, y: 0};
+
+  let currentStart = 1;
+  let ring = 1;
+  while (true) {
+    const capacity = 6 * ring;
+    if (index < currentStart + capacity) {
+      const slot = index - currentStart;
+      const radius = 540 + (ring - 1) * 520;
+
+      // Pair opposing slots so islands balance across 360 degrees as each one is added
+      const pair = Math.floor(slot / 2);
+      const isSecondOfPair = slot % 2 === 1;
+      const totalPairs = 3 * ring;
+
+      const stride = ring === 1 ? 1 : ring === 2 ? 2 : 3;
+      const pairIndex = (pair * stride) % totalPairs;
+      const baseAngleDeg = (360 / capacity) * pairIndex + (ring > 1 ? 15 / ring : 0);
+      const angleDeg = isSecondOfPair ? baseAngleDeg + 180 : baseAngleDeg;
+      const rad = (angleDeg * Math.PI) / 180;
+
+      return {
+        x: Math.round(radius * Math.cos(rad)),
+        y: Math.round(radius * Math.sin(rad)),
+      };
+    }
+    currentStart += capacity;
+    ring += 1;
+  }
 }
 
 function vaultValue(vault: VaultView) {
