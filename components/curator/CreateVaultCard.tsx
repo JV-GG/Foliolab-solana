@@ -253,16 +253,16 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
                   </button>
                 </div>
 
-                {/* 3-Column Grid inside the popup: fixed to 2 rows height with scroll */}
-                <div className="max-h-[90px] overflow-y-auto rounded-xl border border-[#e5ebe3] bg-[#fcfdfa] p-1.5">
+                {/* 1-Column List inside the popup: fixed to 5 rows height with scroll */}
+                <div className="max-h-[216px] overflow-y-auto rounded-xl border border-[#e5ebe3] bg-[#fcfdfa] p-1.5">
                   {filteredTokens.length === 0 ? (
-                    <div className="p-3 text-center text-[11px] text-[#717b72]">
+                    <div className="p-4 text-center text-[11px] text-[#717b72]">
                       {filterTab === 'selected'
                         ? 'No assets selected yet. Switch to "All" to pick assets.'
                         : 'No matching asset found.'}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-3 gap-1.5">
+                    <div className="grid grid-cols-1 gap-1.5">
                       {filteredTokens.map((token) => {
                         const isSelected = selectedMints.includes(token.mint);
                         const isCrypto = token.category === 'crypto';
@@ -273,22 +273,27 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
                             onClick={() => toggleToken(token.mint)}
                             disabled={busy}
                             title={token.name}
-                            className={`flex h-9 items-center justify-between rounded-lg px-2.5 text-left font-mono text-[12px] font-semibold transition-all border ${
+                            className={`flex h-9 items-center justify-between rounded-lg px-3 text-left transition-all border ${
                               isSelected
                                 ? 'border-[#237b68] bg-[#edf6f2] text-[#185347] shadow-2xs ring-1 ring-[#237b68]/40'
                                 : 'border-[#e2e7df] bg-white text-[#2b3a30] hover:border-[#237b68]/40 hover:bg-[#fbfcfb]'
                             }`}
                           >
-                            <div className="flex items-center gap-1.5 min-w-0">
+                            <div className="flex items-center gap-2 min-w-0">
                               <span
-                                className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                                className={`h-2 w-2 shrink-0 rounded-full ${
                                   isCrypto ? 'bg-[#9945FF]' : 'bg-[#237b68]'
                                 }`}
                               />
-                              <span className="truncate">{token.symbol}</span>
+                              <span className="font-mono text-[12px] font-bold text-[#2b3a30] truncate">
+                                {token.symbol}
+                              </span>
+                              <span className="rounded bg-[#f0f3ee] px-1.5 py-0.5 text-[9px] font-mono text-[#5f6861]">
+                                {isCrypto ? 'Crypto' : 'RWA'}
+                              </span>
                             </div>
                             <span
-                              className={`ml-1 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full text-[8px] font-bold ${
+                              className={`ml-2 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold ${
                                 isSelected
                                   ? 'bg-[#237b68] text-white'
                                   : 'border border-[#cdd3ca] text-transparent'
