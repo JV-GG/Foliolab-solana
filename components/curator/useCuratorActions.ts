@@ -21,7 +21,7 @@ import {
   usdToUnits,
   vaultPda,
 } from '@/lib/solana/program';
-import type {SignedPrices, TradeQuote} from './model';
+import {sameAddress, type SignedPrices, type TradeQuote} from './model';
 import type {VaultView, TargetWeight} from '@/lib/vaults/read';
 
 export type CuratorAction =
@@ -256,6 +256,9 @@ export function useCuratorActions() {
       try {
         const program = folioProgram(connection);
         const v = await program.account.vault.fetch(vault);
+        if (!sameAddress(v.manager.toBase58(), keeper.toBase58())) {
+          throw new Error('Unauthorized: Only the vault curator (manager) can execute manual rebalancing.');
+        }
         const programs = await tokenProgramsOf(connection, [...v.held, buy]);
         const [sellProgram, buyProgram] = [programs.get(sell.toBase58())!, programs.get(buy.toBase58())!];
         const ix = await program.methods
@@ -374,6 +377,9 @@ export function useCuratorActions() {
       onStage?: (stage: RebalanceStage) => void,
     ): Promise<RebalanceResult> => {
       const keeper = requireWallet();
+      if (!sameAddress(vault.manager, keeper.toBase58())) {
+        throw new Error('Unauthorized: Only the vault curator (manager) can execute manual rebalancing.');
+      }
       setAction('simulating');
       onStage?.('simulating');
 

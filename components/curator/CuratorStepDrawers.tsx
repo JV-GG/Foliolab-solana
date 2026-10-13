@@ -6,6 +6,7 @@ import {useQueryClient} from '@tanstack/react-query';
 import {PublicKey} from '@solana/web3.js';
 import {useNotify} from '@/components/Toast';
 import {explainError, useOnChainTokens, VAULTS_KEY, type VaultView} from '@/lib/contracts/hooks';
+import type {TargetWeight} from '@/lib/vaults/read';
 import {deployment, explorerUrl} from '@/lib/solana/config';
 import {formatSol, tokenAmount} from '@/lib/domain/format';
 import {MAX_PLAN_BYTES, utf8ByteLength} from './model';
@@ -172,7 +173,18 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
     setRebalanceError(null);
     setRebalancePending(true);
     try {
-      const res = await forceRebalance(vault);
+      const customTargetsList: TargetWeight[] = Object.entries(weights)
+        .filter(([, pct]) => Number(pct) > 0)
+        .map(([asset, pct]) => {
+          const info = tokens.find((t) => t.mint === asset);
+          return {
+            asset,
+            symbol: info?.symbol ?? `${asset.slice(0, 4)}…${asset.slice(-4)}`,
+            targetBps: Math.round(Number(pct) * 100),
+            targetPercent: Number(pct),
+          };
+        });
+      const res = await forceRebalance(vault, customTargetsList.length > 0 ? customTargetsList : undefined);
       const count = res.trades?.length ?? 1;
       if (vault.openProposal) {
         if (typeof window !== 'undefined') {
