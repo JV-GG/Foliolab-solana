@@ -47,4 +47,6 @@ next-env.d.ts
 .closed-vaults.json
 .proposals.json
 .picked-tokens.json
+.closed-proposals.json
+.vault-strategies.json
 

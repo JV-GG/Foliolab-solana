@@ -8,8 +8,8 @@ import {cached} from '@/lib/chain/cache';
 import {errorResponse, parseKey} from '@/lib/chain/server';
 import {readVault} from '@/lib/vaults/read';
 
-export async function GET(request: Request, ctx: RouteContext<'/api/vaults/[address]'>) {
-  const {address} = await ctx.params;
+export async function GET(request: Request, {params}: {params: Promise<{address: string}>}) {
+  const {address} = await params;
   const account = new URL(request.url).searchParams.get('account');
   try {
     const owner = account ? parseKey(account, 'account') : undefined;
