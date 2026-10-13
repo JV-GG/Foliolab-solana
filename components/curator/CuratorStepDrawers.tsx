@@ -201,6 +201,8 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
   }, [vault.targets, step3Tokens]);
 
   const publishing = action === 'publishing';
+  const [isProposing, setIsProposing] = useState(false);
+  const [pendingRemovalMint, setPendingRemovalMint] = useState<string | null>(null);
 
   function hasAssetBalance(mint: string): boolean {
     const token = tokens.find((t) => t.mint === mint);
@@ -209,36 +211,35 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
     );
   }
 
-  function handleRemoveAsset(mint: string) {
+  function executeRemoval(mint: string) {
+    setSelectedMints((prev) => prev.filter((m) => m !== mint));
+    setWeights((prevWeights) => {
+      const updated = {...prevWeights};
+      delete updated[mint];
+      return updated;
+    });
+    setPendingRemovalMint(null);
+    const sym = tokens.find((t) => t.mint === mint)?.symbol || 'Asset';
+    notify(`Removed ${sym} from proposal (will liquidate position to USDC upon rebalance).`);
+  }
+
+  function handleRequestRemoveAsset(mint: string) {
     if (!managerAllowed || publishing) return;
     if (hasAssetBalance(mint)) {
-      const sym = tokens.find((t) => t.mint === mint)?.symbol || 'Asset';
-      notify(`Cannot remove ${sym}: vault holds an active balance. Rebalance or liquidate first.`);
-      return;
+      setPendingRemovalMint(mint);
+    } else {
+      executeRemoval(mint);
     }
-    toggleToken(mint);
   }
 
   function toggleToken(mint: string) {
     if (!managerAllowed || publishing) return;
-    if (selectedMints.includes(mint) && hasAssetBalance(mint)) {
-      const sym = tokens.find((t) => t.mint === mint)?.symbol || 'Asset';
-      notify(`Cannot remove ${sym}: vault holds an active balance. Rebalance or liquidate first.`);
-      return;
+    if (selectedMints.includes(mint)) {
+      handleRequestRemoveAsset(mint);
+    } else {
+      setSelectedMints((prev) => [...prev, mint]);
+      setWeights((prevWeights) => ({...prevWeights, [mint]: 0}));
     }
-    setSelectedMints((prev) => {
-      const next = prev.includes(mint) ? prev.filter((m) => m !== mint) : [...prev, mint];
-      setWeights((prevWeights) => {
-        const updated = {...prevWeights};
-        if (prev.includes(mint)) {
-          delete updated[mint];
-        } else {
-          updated[mint] = 0;
-        }
-        return updated;
-      });
-      return next;
-    });
   }
 
   function handleAddAll() {
@@ -488,6 +489,7 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
       } catch {}
 
       await setStrategy(vault.address, text, targetsPayload);
+      setIsProposing(false);
       notify(`Strategy & target weights confirmed on-chain.`);
     } catch (caught) {
       const message = explainError(caught);
@@ -512,6 +514,7 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
       } catch {}
 
       await proposeStrategy(vault.address, text, targetsPayload, votingDays, 50_000_000);
+      setIsProposing(false);
       notify(`Strategy amendment proposal posted on-chain (0.05 SOL bond attached).`);
       setShowProposeModal(false);
     } catch (caught) {
@@ -836,176 +839,219 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
 
         {openDrawers.step3 && (
           <div className="space-y-4 border-t border-[#e2e6df] p-4 text-xs">
-            {/* Step 3 Asset Selection: Search Bar with Pop-up Sliding Dropdown */}
-            <div ref={dropdownRef} className="relative grid gap-2">
-              <div className="flex items-center justify-between">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-[#6b746c]">
-                  Fund Asset Universe (RWA & Crypto)
-                </label>
-                <span className="font-mono text-[10px] font-semibold text-[#237b68]">
-                  {selectedMints.length} of {availableTokens.length} picked
-                </span>
+            {/* Frozen Strategy Status Banner vs Proposal Mode Banner */}
+            {!isProposing ? (
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-[#cdd3ca] bg-[#f4f7f2] p-3 text-[11px]">
+                <div className="flex items-center gap-2.5">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white border border-[#cdd3ca] text-sm shadow-2xs">
+                    🔒
+                  </span>
+                  <div>
+                    <div className="font-bold text-[#2b3a30]">
+                      Strategy Frozen · Active On-Chain Portfolio
+                    </div>
+                    <div className="text-[10px] text-[#6b746c]">
+                      Asset weights and strategy plan are locked. Click button to start a new proposal.
+                    </div>
+                  </div>
+                </div>
+                {managerAllowed && !activeProposal && (
+                  <button
+                    type="button"
+                    onClick={() => setIsProposing(true)}
+                    className="folio-button-primary shrink-0 py-1.5 px-3.5 text-[11px] font-bold"
+                  >
+                    Start New Proposal →
+                  </button>
+                )}
               </div>
-
-              {/* Search input container with pop-up sliding dropdown positioned ABOVE */}
-              <div className="relative">
-                {/* Pop-up Sliding Dropdown Panel (Positioned ABOVE the search bar) */}
-                {dropdownOpen && (
-                  <div className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-50 space-y-3 rounded-2xl border border-[#cdd3ca] bg-white p-3.5 shadow-2xl transition-all duration-150 animate-in fade-in slide-in-from-bottom-2">
-                    {/* Pop-up Header: Asset count & Close Button */}
-                    <div className="flex items-center justify-between border-b border-[#edf1eb] pb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-editorial text-[13px] font-semibold text-[#253328]">
-                          Asset Universe
-                        </span>
-                        <span className="rounded-full bg-[#f0f3ee] px-2 py-0.5 font-mono text-[10px] font-semibold text-[#59645c]">
-                          {filteredTokens.length} options
-                        </span>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setDropdownOpen(false)}
-                        className="rounded-md p-1 font-mono text-[11px] font-bold text-[#717b72] hover:bg-[#f0f4ee] hover:text-[#2b3a30]"
-                        title="Close popup"
-                      >
-                        ✕
-                      </button>
+            ) : (
+              <div className="flex items-center justify-between rounded-xl border border-[#237b68]/40 bg-[#edf6f2] p-2.5 text-[11px]">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#237b68] text-white text-[10px] font-bold">
+                    ✏️
+                  </span>
+                  <div>
+                    <strong className="text-[#185347]">Drafting Strategy Proposal</strong>
+                    <div className="text-[10px] text-[#2e6d5e]">
+                      Pick assets, adjust allocation weights, and edit memo below.
                     </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWeights(initialWeights);
+                    setSelectedMints(initialSelectedMints);
+                    setText(vault.plan?.text ?? '');
+                    setIsProposing(false);
+                  }}
+                  className="rounded-lg border border-[#cdd3ca] bg-white px-2.5 py-1 text-[10px] font-semibold text-[#59645c] hover:bg-[#f6f8f5]"
+                >
+                  Cancel Draft & Freeze
+                </button>
+              </div>
+            )}
 
-                    {/* 1-Column List inside popup: fixed 5 rows height with scroll & NEAT COLUMN ALIGNMENT */}
-                    <div className="max-h-[216px] overflow-y-auto rounded-xl border border-[#e5ebe3] bg-[#fcfdfa] p-1.5">
-                      {filteredTokens.length === 0 ? (
-                        <div className="p-4 text-center text-[11px] text-[#717b72]">
-                          No matching asset found.
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-1 gap-1.5">
-                          {filteredTokens.map((token) => {
-                            const isSelected = selectedMints.includes(token.mint);
-                            const isCrypto = token.category === 'crypto';
-                            const price = getAssetPrice(token.symbol, token.underlying);
-                            const hasBalance = hasAssetBalance(token.mint);
-                            return (
-                              <button
-                                key={token.mint}
-                                type="button"
-                                onClick={() => toggleToken(token.mint)}
-                                disabled={!managerAllowed || publishing}
-                                title={
-                                  hasBalance && isSelected
-                                    ? `${token.name} (Held in vault: cannot be removed)`
-                                    : token.name
-                                }
-                                className={`flex h-9 w-full items-center justify-between rounded-lg px-3 text-left transition-all border ${
-                                  isSelected
-                                    ? 'border-[#237b68] bg-[#edf6f2] text-[#185347] shadow-2xs ring-1 ring-[#237b68]/40'
-                                    : 'border-[#e2e7df] bg-white text-[#2b3a30] hover:border-[#237b68]/40 hover:bg-[#fbfcfb]'
-                                }`}
-                              >
-                                <div className="flex items-center gap-3 min-w-0">
-                                  <span
-                                    className={`h-2 w-2 shrink-0 rounded-full ${
-                                      isCrypto ? 'bg-[#9945FF]' : 'bg-[#237b68]'
-                                    }`}
-                                  />
-                                  <span className="w-16 shrink-0 font-mono text-[12px] font-bold text-[#2b3a30]">
-                                    {token.symbol}
-                                  </span>
-                                  <span className="w-20 shrink-0 font-mono text-[11px] font-semibold text-[#237b68]">
-                                    {price}
-                                  </span>
-                                  <span className="w-14 shrink-0 text-center rounded bg-[#f0f3ee] px-1.5 py-0.5 text-[9px] font-mono font-medium text-[#5f6861]">
-                                    {isCrypto ? 'Crypto' : 'RWA'}
-                                  </span>
-                                  {hasBalance && (
-                                    <span
-                                      className="rounded bg-[#e8f2fc] px-1.5 py-0.5 text-[9px] font-mono font-semibold text-[#1d5c96]"
-                                      title="Vault holds active balance"
-                                    >
-                                      Held
-                                    </span>
-                                  )}
-                                </div>
-                                <span
-                                  className={`ml-2 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold ${
-                                    isSelected
-                                      ? 'bg-[#237b68] text-white'
-                                      : 'border border-[#cdd3ca] text-transparent'
-                                  }`}
-                                >
-                                  ✓
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
+            {/* Step 3 Asset Selection: Search Bar with Pop-up Sliding Dropdown (Only when drafting proposal) */}
+            {isProposing && (
+              <div ref={dropdownRef} className="relative grid gap-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-[#6b746c]">
+                    Fund Asset Universe (RWA & Crypto)
+                  </label>
+                  <span className="font-mono text-[10px] font-semibold text-[#237b68]">
+                    {selectedMints.length} of {availableTokens.length} picked
+                  </span>
+                </div>
 
-                    {/* Popup Action Footer */}
-                    <div className="flex items-center justify-between pt-1 text-[10px]">
-                      <div className="flex items-center gap-3">
+                {/* Search input container with pop-up sliding dropdown positioned ABOVE */}
+                <div className="relative">
+                  {/* Pop-up Sliding Dropdown Panel (Positioned ABOVE the search bar) */}
+                  {dropdownOpen && (
+                    <div className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-50 space-y-3 rounded-2xl border border-[#cdd3ca] bg-white p-3.5 shadow-2xl transition-all duration-150 animate-in fade-in slide-in-from-bottom-2">
+                      {/* Pop-up Header: Asset count & Close Button */}
+                      <div className="flex items-center justify-between border-b border-[#edf1eb] pb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-editorial text-[13px] font-semibold text-[#253328]">
+                            Asset Universe
+                          </span>
+                          <span className="rounded-full bg-[#f0f3ee] px-2 py-0.5 font-mono text-[10px] font-semibold text-[#59645c]">
+                            {filteredTokens.length} options
+                          </span>
+                        </div>
+
                         <button
                           type="button"
-                          onClick={handleAddAll}
-                          disabled={!managerAllowed || publishing || selectedMints.length === availableTokens.length}
-                          className="text-[#237b68] underline hover:text-[#185347] disabled:opacity-40"
+                          onClick={() => setDropdownOpen(false)}
+                          className="rounded-md p-1 font-mono text-[11px] font-bold text-[#717b72] hover:bg-[#f0f4ee] hover:text-[#2b3a30]"
+                          title="Close popup"
                         >
-                          + Select all ({availableTokens.length})
+                          ✕
                         </button>
-                        {selectedMints.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={handleClearAll}
-                            disabled={!managerAllowed || publishing}
-                            className="text-[#a14343] hover:underline"
-                          >
-                            Clear all
-                          </button>
+                      </div>
+
+                      {/* 1-Column List inside popup: fixed 5 rows height with scroll & NEAT COLUMN ALIGNMENT */}
+                      <div className="max-h-[216px] overflow-y-auto rounded-xl border border-[#e5ebe3] bg-[#fcfdfa] p-1.5">
+                        {filteredTokens.length === 0 ? (
+                          <div className="p-4 text-center text-[11px] text-[#717b72]">
+                            No matching asset found.
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 gap-1.5">
+                            {filteredTokens.map((token) => {
+                              const isSelected = selectedMints.includes(token.mint);
+                              const isCrypto = token.category === 'crypto';
+                              const price = getAssetPrice(token.symbol, token.underlying);
+                              return (
+                                <button
+                                  key={token.mint}
+                                  type="button"
+                                  onClick={() => toggleToken(token.mint)}
+                                  disabled={!managerAllowed || publishing}
+                                  title={token.name}
+                                  className={`flex h-9 w-full items-center justify-between rounded-lg px-3 text-left transition-all border ${
+                                    isSelected
+                                      ? 'border-[#237b68] bg-[#edf6f2] text-[#185347] shadow-2xs ring-1 ring-[#237b68]/40'
+                                      : 'border-[#e2e7df] bg-white text-[#2b3a30] hover:border-[#237b68]/40 hover:bg-[#fbfcfb]'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    <span
+                                      className={`h-2 w-2 shrink-0 rounded-full ${
+                                        isCrypto ? 'bg-[#9945FF]' : 'bg-[#237b68]'
+                                      }`}
+                                    />
+                                    <span className="w-16 shrink-0 font-mono text-[12px] font-bold text-[#2b3a30]">
+                                      {token.symbol}
+                                    </span>
+                                    <span className="w-20 shrink-0 font-mono text-[11px] font-semibold text-[#237b68]">
+                                      {price}
+                                    </span>
+                                    <span className="w-14 shrink-0 text-center rounded bg-[#f0f3ee] px-1.5 py-0.5 text-[9px] font-mono font-medium text-[#5f6861]">
+                                      {isCrypto ? 'Crypto' : 'RWA'}
+                                    </span>
+                                  </div>
+                                  <span
+                                    className={`ml-2 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold ${
+                                      isSelected
+                                        ? 'bg-[#237b68] text-white'
+                                        : 'border border-[#cdd3ca] text-transparent'
+                                    }`}
+                                  >
+                                    ✓
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
                         )}
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => setDropdownOpen(false)}
-                        className="rounded-lg bg-[#237b68] px-3.5 py-1.5 font-mono text-[10px] font-semibold text-white shadow-2xs hover:bg-[#1b6152]"
-                      >
-                        Done
-                      </button>
-                    </div>
-                  </div>
-                )}
+                      {/* Popup Action Footer */}
+                      <div className="flex items-center justify-between pt-1 text-[10px]">
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={handleAddAll}
+                            disabled={!managerAllowed || publishing || selectedMints.length === availableTokens.length}
+                            className="text-[#237b68] underline hover:text-[#185347] disabled:opacity-40"
+                          >
+                            + Select all ({availableTokens.length})
+                          </button>
+                          {selectedMints.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={handleClearAll}
+                              disabled={!managerAllowed || publishing}
+                              className="text-[#a14343] hover:underline"
+                            >
+                              Clear unheld
+                            </button>
+                          )}
+                        </div>
 
-                {/* The Search Input Field */}
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => {
-                    setSearch(e.target.value);
-                    if (!dropdownOpen) setDropdownOpen(true);
-                  }}
-                  onFocus={() => setDropdownOpen(true)}
-                  placeholder="Search & pick assets (e.g. AAPLx, SOL, NVDAx, BTC)..."
-                  disabled={!managerAllowed || publishing}
-                  className="w-full rounded-[14px] border border-[#aeb8ad] bg-[#fcfdf9]/70 py-2.5 pl-9 pr-9 font-mono text-[12px] text-[#2b3a30] shadow-2xs outline-none focus:border-[#237b68] disabled:opacity-55"
-                />
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-[#717b72]">
-                  🔍
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setDropdownOpen((prev) => !prev)}
-                  disabled={!managerAllowed || publishing}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-xs text-[#717b72] hover:text-[#2b3a30]"
-                  title={dropdownOpen ? 'Close popup' : 'Open popup'}
-                >
-                  <span className={`inline-block transition-transform duration-200 ${dropdownOpen ? 'rotate-180' : ''}`}>
-                    ▼
+                        <button
+                          type="button"
+                          onClick={() => setDropdownOpen(false)}
+                          className="rounded-lg bg-[#237b68] px-3.5 py-1.5 font-mono text-[10px] font-semibold text-white shadow-2xs hover:bg-[#1b6152]"
+                        >
+                          Done
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* The Search Input Field */}
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      if (!dropdownOpen) setDropdownOpen(true);
+                    }}
+                    onFocus={() => setDropdownOpen(true)}
+                    placeholder="Search & pick assets (e.g. AAPLx, SOL, NVDAx, BTC)..."
+                    disabled={!managerAllowed || publishing}
+                    className="w-full rounded-[14px] border border-[#aeb8ad] bg-[#fcfdf9]/70 py-2.5 pl-9 pr-9 font-mono text-[12px] text-[#2b3a30] shadow-2xs outline-none focus:border-[#237b68] disabled:opacity-55"
+                  />
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-[#717b72]">
+                    🔍
                   </span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setDropdownOpen((prev) => !prev)}
+                    disabled={!managerAllowed || publishing}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-xs text-[#717b72] hover:text-[#2b3a30]"
+                    title={dropdownOpen ? 'Close popup' : 'Open popup'}
+                  >
+                    <span className={`inline-block transition-transform duration-200 ${dropdownOpen ? 'rotate-180' : ''}`}>
+                      ▼
+                    </span>
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="pt-2 border-t border-[#edf1eb]">
               <div className="flex items-center justify-between">
@@ -1019,37 +1065,39 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
 
               <div className="flex items-center justify-between text-[10px] text-[#717b72]">
                 <span>Configure portfolio allocations for your index strategy.</span>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    disabled={!managerAllowed || publishing}
-                    onClick={() => {
-                      const next: Record<string, number> = {};
-                      step3Tokens.forEach((t) => { next[t.mint] = 0; });
-                      setWeights(next);
-                    }}
-                    className="text-[#717b72] hover:text-[#253328] hover:underline"
-                  >
-                    Reset to 100% USDC
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!managerAllowed || publishing || step3Tokens.length === 0}
-                    onClick={() => {
-                      if (step3Tokens.length === 0) return;
-                      const perToken = Math.floor(100 / step3Tokens.length);
-                      const rem = 100 - (perToken * step3Tokens.length);
-                      const next: Record<string, number> = {};
-                      step3Tokens.forEach((t, i) => {
-                        next[t.mint] = perToken + (i === 0 ? rem : 0);
-                      });
-                      setWeights(next);
-                    }}
-                    className="font-medium text-[#237b68] hover:underline"
-                  >
-                    Equally balance stocks (0% USDC)
-                  </button>
-                </div>
+                {isProposing && (
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      disabled={!managerAllowed || publishing}
+                      onClick={() => {
+                        const next: Record<string, number> = {};
+                        step3Tokens.forEach((t) => { next[t.mint] = 0; });
+                        setWeights(next);
+                      }}
+                      className="text-[#717b72] hover:text-[#253328] hover:underline"
+                    >
+                      Reset to 100% USDC
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!managerAllowed || publishing || step3Tokens.length === 0}
+                      onClick={() => {
+                        if (step3Tokens.length === 0) return;
+                        const perToken = Math.floor(100 / step3Tokens.length);
+                        const rem = 100 - (perToken * step3Tokens.length);
+                        const next: Record<string, number> = {};
+                        step3Tokens.forEach((t, i) => {
+                          next[t.mint] = perToken + (i === 0 ? rem : 0);
+                        });
+                        setWeights(next);
+                      }}
+                      className="font-medium text-[#237b68] hover:underline"
+                    >
+                      Equally balance stocks (0% USDC)
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1103,17 +1151,28 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                   const maxAllowed = Math.max(0, 100 - otherSum);
                   const isCrypto = token.category === 'crypto';
                   const price = getAssetPrice(token.symbol, token.underlying);
-                  const hasBalance = hasAssetBalance(token.mint);
 
                   return (
                     <div key={token.mint} className="rounded-lg border border-[#e2e6df] bg-white p-2.5 shadow-sm">
                       <div className="flex items-center justify-between text-[11px]">
                         <div className="flex items-center gap-2 min-w-0">
-                          <span
-                            className={`h-2 w-2 shrink-0 rounded-full ${
-                              isCrypto ? 'bg-[#9945FF]' : 'bg-[#237b68]'
-                            }`}
-                          />
+                          {/* Left: Delete button replacing bullet when drafting */}
+                          {isProposing && managerAllowed && !publishing ? (
+                            <button
+                              type="button"
+                              onClick={() => handleRequestRemoveAsset(token.mint)}
+                              title={`Remove ${token.symbol} from proposal`}
+                              className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-[#f2d8d8] bg-[#fdf5f5] text-[10px] font-bold text-[#b83838] hover:border-[#b83838] hover:bg-[#ffebeb] transition-colors"
+                            >
+                              ✕
+                            </button>
+                          ) : (
+                            <span
+                              className={`h-2 w-2 shrink-0 rounded-full ${
+                                isCrypto ? 'bg-[#9945FF]' : 'bg-[#237b68]'
+                              }`}
+                            />
+                          )}
                           <strong className="font-mono text-[12px] font-bold text-[#253328]">{token.symbol}</strong>
                           <span className="rounded bg-[#edf6f2] px-2 py-0.5 font-mono text-[11px] font-bold text-[#237b68] shadow-2xs">
                             {price}
@@ -1121,53 +1180,23 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                           <span className="rounded bg-[#f0f3ee] px-1.5 py-0.5 font-mono text-[9px] text-[#5f6861]">
                             {isCrypto ? 'Crypto' : 'RWA'}
                           </span>
-                          {hasBalance && (
-                            <span
-                              className="rounded bg-[#e8f2fc] px-1.5 py-0.5 font-mono text-[9px] font-semibold text-[#1d5c96]"
-                              title="Vault holds active balance of this token"
-                            >
-                              Held
-                            </span>
-                          )}
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="number"
-                              min="0"
-                              max="100"
-                              step="1"
-                              value={currentPct}
-                              disabled={!managerAllowed || publishing}
-                              onChange={(e) => {
-                                const raw = Number(e.target.value) || 0;
-                                const clamped = Math.min(maxAllowed, Math.max(0, raw));
-                                setWeights((prev) => ({...prev, [token.mint]: clamped}));
-                              }}
-                              className="h-6 w-14 rounded border border-[#cdd3ca] px-1 text-right font-mono text-[11px] font-bold"
-                            />
-                            <span className="font-mono text-[10px] font-semibold text-[#717b72]">%</span>
-                          </div>
-
-                          {managerAllowed && !publishing && (
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveAsset(token.mint)}
-                              disabled={hasBalance}
-                              title={
-                                hasBalance
-                                  ? 'Cannot remove: vault holds active balance of this asset'
-                                  : `Remove ${token.symbol} from vault`
-                              }
-                              className={`flex h-6 w-6 items-center justify-center rounded border transition-colors ${
-                                hasBalance
-                                  ? 'cursor-not-allowed border-transparent text-[#b0b8af] opacity-40'
-                                  : 'border-[#f2d8d8] bg-[#fdf5f5] text-[#b83838] hover:border-[#b83838] hover:bg-[#ffebeb]'
-                              }`}
-                            >
-                              ✕
-                            </button>
-                          )}
+                        <div className="flex items-center gap-1 shrink-0">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="1"
+                            value={currentPct}
+                            disabled={!isProposing || !managerAllowed || publishing}
+                            onChange={(e) => {
+                              const raw = Number(e.target.value) || 0;
+                              const clamped = Math.min(maxAllowed, Math.max(0, raw));
+                              setWeights((prev) => ({...prev, [token.mint]: clamped}));
+                            }}
+                            className="h-6 w-14 rounded border border-[#cdd3ca] px-1 text-right font-mono text-[11px] font-bold disabled:bg-[#f6f8f5] disabled:text-[#6b746c]"
+                          />
+                          <span className="font-mono text-[10px] font-semibold text-[#717b72]">%</span>
                         </div>
                       </div>
                       <input
@@ -1176,13 +1205,13 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                         max="100"
                         step="1"
                         value={Math.min(currentPct, maxAllowed)}
-                        disabled={!managerAllowed || publishing}
+                        disabled={!isProposing || !managerAllowed || publishing}
                         onChange={(e) => {
                           const raw = Number(e.target.value) || 0;
                           const clamped = Math.min(maxAllowed, Math.max(0, raw));
                           setWeights((prev) => ({...prev, [token.mint]: clamped}));
                         }}
-                        className="mt-2 h-1 w-full accent-[#237b68]"
+                        className="mt-2 h-1 w-full accent-[#237b68] disabled:opacity-40"
                       />
                       <div className="mt-1 flex items-center justify-between text-[9px] text-[#849087]">
                         <span>0%</span>
@@ -1207,9 +1236,9 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                disabled={!managerAllowed || publishing}
+                disabled={!isProposing || !managerAllowed || publishing}
                 placeholder="Describe your index strategy, rebalancing rules, and asset selection..."
-                className="mt-1.5 h-20 w-full rounded-lg border border-[#cdd3ca] bg-white p-2 text-[11px] leading-relaxed text-[#253328]"
+                className="mt-1.5 h-20 w-full rounded-lg border border-[#cdd3ca] bg-white p-2 text-[11px] leading-relaxed text-[#253328] disabled:bg-[#f6f8f5] disabled:text-[#6b746c]"
               />
             </div>
 
@@ -1223,14 +1252,38 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
             {managerAllowed && (
               <div className="flex gap-2">
                 {isDraftOrSeeded ? (
-                  <button
-                    type="button"
-                    onClick={() => void handleSaveStrategy()}
-                    disabled={!validLength || !validWeights || publishing}
-                    className="folio-button-primary flex-1 py-2 text-[11px]"
-                  >
-                    {publishing ? 'Publishing on-chain…' : 'Publish Strategy & Targets →'}
-                  </button>
+                  !isProposing ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsProposing(true)}
+                      className="folio-button-primary flex-1 py-2 text-[11px]"
+                    >
+                      Configure Strategy & Targets →
+                    </button>
+                  ) : (
+                    <div className="flex gap-2 w-full">
+                      <button
+                        type="button"
+                        onClick={() => void handleSaveStrategy()}
+                        disabled={!validLength || !validWeights || publishing}
+                        className="folio-button-primary flex-1 py-2 text-[11px]"
+                      >
+                        {publishing ? 'Publishing on-chain…' : 'Publish Strategy & Targets →'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setWeights(initialWeights);
+                          setSelectedMints(initialSelectedMints);
+                          setText(vault.plan?.text ?? '');
+                          setIsProposing(false);
+                        }}
+                        className="rounded-lg border border-[#cdd3ca] bg-white px-3.5 py-2 text-[11px] font-semibold text-[#59645c] hover:bg-[#f6f8f5]"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )
                 ) : (
                   <div className="w-full space-y-2">
                     {activeProposal ? (
@@ -1319,15 +1372,14 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                           </div>
                         </div>
                       </div>
-                    ) : (
+                    ) : !isProposing ? (
                       <>
                         <button
                           type="button"
-                          onClick={() => setShowProposeModal(true)}
-                          disabled={!validLength || !validWeights || publishing}
-                          className="folio-button-primary w-full py-2 text-[11px]"
+                          onClick={() => setIsProposing(true)}
+                          className="folio-button-primary w-full py-2.5 text-[12px] font-bold"
                         >
-                          Propose Strategy Amendment to Investors →
+                          + Start New Proposal (Edit Strategy & Weights) →
                         </button>
                         <button
                           type="button"
@@ -1338,9 +1390,81 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                           {rebalancePending ? 'Executing Rebalance…' : '⚡ Force Rebalance Vault Assets Now'}
                         </button>
                       </>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowProposeModal(true)}
+                          disabled={!validLength || !validWeights || publishing}
+                          className="folio-button-primary flex-1 py-2 text-[11px]"
+                        >
+                          Propose Strategy Amendment to Investors →
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setWeights(initialWeights);
+                            setSelectedMints(initialSelectedMints);
+                            setText(vault.plan?.text ?? '');
+                            setIsProposing(false);
+                          }}
+                          className="rounded-lg border border-[#cdd3ca] bg-white px-3.5 py-2 text-[11px] font-semibold text-[#59645c] hover:bg-[#f6f8f5]"
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Modal Warning Popup when removing an asset with positive balance */}
+            {pendingRemovalMint && (
+              <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs animate-in fade-in">
+                <div className="w-full max-w-md rounded-2xl border border-[#cdd3ca] bg-white p-5 shadow-2xl space-y-4">
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#faebd0] text-lg text-[#a67c1e]">
+                      ⚠️
+                    </span>
+                    <div>
+                      <h4 className="font-editorial text-[17px] font-bold text-[#253328]">
+                        Liquidate Holding to USDC?
+                      </h4>
+                      <span className="font-mono text-[11px] text-[#717b72]">
+                        {tokens.find((t) => t.mint === pendingRemovalMint)?.symbol || 'Asset'} currently has a vault balance
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-[#f0dede] bg-[#fdf5f5] p-3 text-[12px] leading-relaxed text-[#7a2e2e]">
+                    The vault currently owns shares of{' '}
+                    <strong>{tokens.find((t) => t.mint === pendingRemovalMint)?.symbol}</strong>.
+                    Removing this asset from your proposal sets its target allocation to <strong>0%</strong>.
+                    When this proposal passes and executes, <strong>100% of this holding will be liquidated into USDC cash</strong>.
+                  </div>
+
+                  <p className="text-[11px] text-[#6b746c]">
+                    Are you sure you want to remove this asset and liquidate its entire position to USDC?
+                  </p>
+
+                  <div className="flex items-center justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setPendingRemovalMint(null)}
+                      className="rounded-lg border border-[#cdd3ca] bg-white px-3.5 py-2 text-[11px] font-semibold text-[#59645c] hover:bg-[#f6f8f5]"
+                    >
+                      Cancel (Keep Asset)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => executeRemoval(pendingRemovalMint)}
+                      className="rounded-lg bg-[#b83838] px-3.5 py-2 text-[11px] font-bold text-white shadow-xs hover:bg-[#992c2c]"
+                    >
+                      Confirm & Liquidate to USDC →
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>
