@@ -40,7 +40,7 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
   const router = useRouter();
   const queryClient = useQueryClient();
   const notify = useNotify();
-  const {action, setStrategy, proposeStrategy, fundGas, forceRebalance} = useCuratorActions();
+  const {action, setStrategy, proposeStrategy, fundGas, forceRebalance, closeVault} = useCuratorActions();
 
   const [isProposalClosedLocally, setIsProposalClosedLocally] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -55,9 +55,11 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
 
   const activeProposal = vault.openProposal && !isProposalClosedLocally ? vault.openProposal : null;
 
+  const isVaultClosedState = vault.state === 'CLOSED';
 
   // Smart initial open state: open the step requiring attention
   const defaultOpenDrawer = useMemo(() => {
+    if (vault.state === 'CLOSED') return 'step6';
     if (vault.state === 'DRAFT') return 'step2';
     if (vault.state === 'SEEDED') return 'step5';
     if (!vault.plan) return 'step3';
@@ -337,6 +339,88 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
     }
   }
 
+  const [closingVault, setClosingVault] = useState(false);
+  const [liquidating, setLiquidating] = useState(false);
+  const [proposingLiquidation, setProposingLiquidation] = useState(false);
+
+  const usdcAsset = useMemo(() => {
+    return vault.holdings.find((h) => h.symbol === 'USDC')?.asset || tokens.find((t) => t.symbol === 'USDC')?.mint || '';
+  }, [vault.holdings, tokens]);
+
+  const nonUsdcHoldings = useMemo(() => {
+    return vault.holdings.filter((h) => h.symbol !== 'USDC' && BigInt(h.amount) > BigInt(0));
+  }, [vault.holdings]);
+
+  const hasNonUsdcAssets = nonUsdcHoldings.length > 0;
+  const usdcHolding = useMemo(() => vault.holdings.find((h) => h.symbol === 'USDC'), [vault.holdings]);
+
+  async function handleProposeLiquidation() {
+    if (!managerAllowed || proposingLiquidation) return;
+    if (!usdcAsset) {
+      notify('USDC settlement token address could not be resolved.');
+      return;
+    }
+    setProposingLiquidation(true);
+    try {
+      const planText = '[LIQUIDATION] Emergency liquidation to 100% USDC and vault closure. All positions will be converted to USDC cash.';
+      const targets = [{mint: new PublicKey(usdcAsset), targetBps: 10000}];
+      await proposeStrategy(vault.address, planText, targets, 1, 50_000_000);
+      notify('Liquidation proposal submitted on-chain (0.05 SOL bond attached). Governance vote is open!');
+      void queryClient.invalidateQueries({queryKey: [VAULTS_KEY]});
+      router.refresh();
+    } catch (caught) {
+      const message = explainError(caught);
+      notify(message);
+    } finally {
+      setProposingLiquidation(false);
+    }
+  }
+
+  async function handleLiquidateHoldingsToUsdc() {
+    if (!managerAllowed || liquidating) return;
+    if (!usdcAsset) {
+      notify('USDC settlement token address could not be resolved.');
+      return;
+    }
+    setLiquidating(true);
+    try {
+      const usdcTargets: TargetWeight[] = [
+        {
+          asset: usdcAsset,
+          symbol: 'USDC',
+          targetBps: 10000,
+          targetPercent: 100,
+        },
+      ];
+      const res = await forceRebalance(vault, usdcTargets);
+      const count = res.trades?.length ?? 1;
+      notify(`Liquidation rebalance executed! ${count} trade${count > 1 ? 's' : ''} confirmed. Vault portfolio converted to USDC.`);
+      void queryClient.invalidateQueries({queryKey: [VAULTS_KEY]});
+      router.refresh();
+    } catch (caught) {
+      const message = explainError(caught);
+      notify(message);
+    } finally {
+      setLiquidating(false);
+    }
+  }
+
+  async function handleFinalizeVaultClose() {
+    if (!managerAllowed || closingVault) return;
+    setClosingVault(true);
+    try {
+      const res = await closeVault(vault.address);
+      notify(`Vault closed successfully! ${res.reclaimedSol || '0.01 SOL'} rent-exemption reclaimed to your wallet.`);
+      void queryClient.invalidateQueries({queryKey: [VAULTS_KEY]});
+      router.refresh();
+    } catch (caught) {
+      const message = explainError(caught);
+      notify(message);
+    } finally {
+      setClosingVault(false);
+    }
+  }
+
   // Holdings & overview data
   const holdings = vault.holdings.filter((h) => BigInt(h.amount) > BigInt(0));
   const mix = assetMix(vault.holdings);
@@ -344,7 +428,7 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
   const totalMixValue = mix.status === 'ready' ? mix.assets.reduce((sum, a) => sum + a.value, 0) : null;
   const walletShare = vault.position ? sharePartsPerMillion(vault.position.shares, vault.totalSupply) : null;
   const gasSol = (Number(vault.gasTankLamports || '0') / 1e9).toFixed(3);
-  const isBusy = action === 'seeding' || action === 'activating' || action === 'publishing';
+  const isBusy = action === 'seeding' || action === 'activating' || action === 'publishing' || liquidating || closingVault || proposingLiquidation;
 
   // Step Status Helpers
   const step1Done = true;
@@ -352,6 +436,7 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
   const step3Done = Boolean(vault.targets && vault.targets.length > 0 && vault.plan);
   const step4Done = Number(vault.gasTankLamports || '0') >= 20_000;
   const step5Done = vault.state === 'ACTIVE';
+  const step6Done = isVaultClosedState;
 
   return (
     <div className="space-y-3">
@@ -360,15 +445,22 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
         <div className="flex items-center justify-between text-[11px] font-bold text-[#455248]">
           <span className="eyebrow text-[#455248]">Setup & Lifecycle</span>
           <span className="font-mono text-[10px] text-[#6b746c]">
-            {step5Done ? '5 / 5 Complete' : step2Done ? 'Setup in Progress' : 'Initial Setup'}
+            {step6Done
+              ? 'Closed · Rent Reclaimed'
+              : step5Done
+              ? '5 / 5 Complete (Active)'
+              : step2Done
+              ? 'Setup in Progress'
+              : 'Initial Setup'}
           </span>
         </div>
-        <div className="mt-2.5 grid grid-cols-5 gap-1.5">
+        <div className="mt-2.5 grid grid-cols-6 gap-1.5">
           <div className="h-1.5 rounded-full bg-[#237b68]" title="Step 1: Created" />
           <div className={`h-1.5 rounded-full ${step2Done ? 'bg-[#237b68]' : 'bg-[#e2a82b]'}`} title="Step 2: Seed" />
           <div className={`h-1.5 rounded-full ${step3Done ? 'bg-[#237b68]' : 'bg-[#cdd3ca]'}`} title="Step 3: Strategy" />
           <div className={`h-1.5 rounded-full ${step4Done ? 'bg-[#237b68]' : 'bg-[#cdd3ca]'}`} title="Step 4: Gas Tank" />
           <div className={`h-1.5 rounded-full ${step5Done ? 'bg-[#237b68]' : 'bg-[#cdd3ca]'}`} title="Step 5: Active" />
+          <div className={`h-1.5 rounded-full ${step6Done ? 'bg-[#237b68]' : 'bg-[#cdd3ca]'}`} title="Step 6: Liquidation & Closure" />
         </div>
       </div>
 
@@ -947,6 +1039,210 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
               <p className="text-[11px] text-[#717b72]">
                 Complete Step 2 (Deposit Seed Capital) before activating the vault.
               </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* DRAWER 6: Vault Liquidation & Closure (Reclaim Rent) */}
+      <div className="overflow-hidden rounded-xl border border-[#cdd3ca] bg-[#fafbf8] transition-all">
+        <button
+          type="button"
+          onClick={() => toggleDrawer('step6')}
+          className="flex w-full items-center justify-between p-3.5 text-left hover:bg-[#f2f5ee]"
+        >
+          <div className="flex items-center gap-2.5">
+            <span
+              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${
+                isVaultClosedState ? 'bg-[#237b68]' : 'bg-[#a14343]'
+              }`}
+            >
+              {isVaultClosedState ? '✓' : '6'}
+            </span>
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#717b72]">Lifecycle</span>
+              <h3 className="font-editorial text-[15px] font-semibold text-[#253328]">
+                Vault Liquidation & Closure (Reclaim Rent)
+              </h3>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className={`rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold ${
+                isVaultClosedState
+                  ? 'bg-[#dfede8] text-[#237b68]'
+                  : 'bg-[#faebd0] text-[#a67c1e]'
+              }`}
+            >
+              {isVaultClosedState ? 'CLOSED (Rent Reclaimed)' : 'Active / Open'}
+            </span>
+            <span className="text-xs text-[#717b72]">{openDrawers.step6 ? '▲' : '▼'}</span>
+          </div>
+        </button>
+
+        {openDrawers.step6 && (
+          <div className="space-y-4 border-t border-[#e2e6df] p-4 text-xs">
+            <p className="text-[11px] leading-relaxed text-[#556156]">
+              To reclaim the <strong>~0.01 SOL</strong> account rent-exemption, the vault undergoes a 4-phase safe wind-down:
+              governance approval, 100% USDC liquidation, investor capital redemption, and permanent vault closure.
+            </p>
+
+            {isVaultClosedState ? (
+              <div className="rounded-lg border border-[#237b68] bg-[#dfede8] p-3 text-[11px] text-[#237b68]">
+                <strong>✓ Vault is Permanently Closed:</strong> All non-USDC holdings were liquidated, and ~0.01 SOL in account rent has been refunded back to your curator wallet. Investors can continue to withdraw their pro-rata USDC cash at any time.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {/* Phase 1: Governance Vote */}
+                <div className="rounded-lg border border-[#cdd3ca] bg-white p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-editorial text-[13px] font-semibold text-[#253328]">
+                      Phase 1: Governance Proposal & Vote
+                    </span>
+                    <span className="rounded bg-[#f2f4ee] px-1.5 py-0.5 text-[9px] font-mono text-[#556156]">
+                      {activeProposal ? 'Vote Active' : 'Required'}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-[#6b746c]">
+                    Closing a live vault requires a community proposal to liquidate 100% of portfolio holdings into USDC.
+                  </p>
+
+                  {activeProposal ? (
+                    <div className="mt-3 rounded border border-[#c2b280] bg-[#fffbf0] p-2.5">
+                      <div className="flex items-center justify-between font-mono text-[10px] font-semibold text-[#7a6b32]">
+                        <span>Proposal #{activeProposal.id}</span>
+                        <span>Yes: {activeProposal.yesPercent ?? 100}% · No: {activeProposal.noPercent ?? 0}%</span>
+                      </div>
+                      <p className="mt-1 font-editorial text-[11px] italic text-[#4a4220]">
+                        &quot;{activeProposal.planText}&quot;
+                      </p>
+                      {managerAllowed && (
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void handleConcludeByVote(true)}
+                            disabled={concludingVote || isBusy}
+                            className="folio-button-primary py-1.5 px-3 text-[10px]"
+                          >
+                            {concludingVote ? 'Adopting...' : '✓ Pass & Adopt Liquidation'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    managerAllowed && (
+                      <div className="mt-2.5">
+                        <button
+                          type="button"
+                          onClick={() => void handleProposeLiquidation()}
+                          disabled={proposingLiquidation || isBusy}
+                          className="folio-button-secondary w-full py-2 text-[11px]"
+                        >
+                          {proposingLiquidation ? 'Posting Proposal…' : '🗳️ Propose 100% USDC Liquidation (0.05 SOL Bond)'}
+                        </button>
+                      </div>
+                    )
+                  )}
+                </div>
+
+                {/* Phase 2: Liquidate all assets into USDC */}
+                <div className="rounded-lg border border-[#cdd3ca] bg-white p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-editorial text-[13px] font-semibold text-[#253328]">
+                      Phase 2: Sell All Holdings into USDC
+                    </span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[9px] font-mono font-semibold ${
+                        !hasNonUsdcAssets ? 'bg-[#dfede8] text-[#237b68]' : 'bg-[#faebd0] text-[#a67c1e]'
+                      }`}
+                    >
+                      {!hasNonUsdcAssets ? '100% USDC Ready' : 'Stocks Remaining'}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-[#6b746c]">
+                    Swaps all tokenized stock holdings (AAPL, NVDA, TSLA) into USDC cash via router swap CPI.
+                  </p>
+
+                  {hasNonUsdcAssets ? (
+                    <div className="mt-2.5 space-y-2">
+                      <div className="rounded border border-[#e2a82b] bg-[#fffcf5] p-2 text-[10px] text-[#7a530e]">
+                        <strong>Tokens to liquidate:</strong>{' '}
+                        {nonUsdcHoldings.map((h) => `${tokenAmount(h.amount, h.decimals, 4)} ${h.symbol}`).join(', ')}
+                      </div>
+                      {managerAllowed && (
+                        <button
+                          type="button"
+                          onClick={() => void handleLiquidateHoldingsToUsdc()}
+                          disabled={liquidating || isBusy}
+                          className="folio-button-primary w-full py-2 text-[11px]"
+                        >
+                          {liquidating ? 'Executing Liquidation Swaps…' : '⚡ 1-Click Liquidate All Stocks into USDC'}
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="mt-2 flex items-center gap-1.5 text-[11px] font-medium text-[#237b68]">
+                      <span>✓</span>
+                      <span>
+                        All portfolio assets are in USDC cash ({usdcHolding ? `${tokenAmount(usdcHolding.amount, 6, 2)} USDC` : '$0 USDC'}).
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Phase 3: Investor Capital Return */}
+                <div className="rounded-lg border border-[#cdd3ca] bg-white p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-editorial text-[13px] font-semibold text-[#253328]">
+                      Phase 3: Investor Capital Redemption
+                    </span>
+                    <span className="rounded bg-[#f2f4ee] px-1.5 py-0.5 text-[9px] font-mono text-[#556156]">
+                      Supply: {tokenAmount(vault.totalSupply, 6, 2)} Shares
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-[#6b746c]">
+                    With the portfolio in 100% USDC, investors (and the curator) can withdraw their shares for 100% pro-rata USDC cash with zero slippage.
+                  </p>
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="text-[10px] text-[#717b72]">
+                      Your curator position: {tokenAmount(vault.position?.shares ?? '0', 6, 2)} shares
+                    </span>
+                    <a
+                      href={`/vaults/${vault.address}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-mono text-[10px] font-bold text-[#237b68] underline hover:text-[#185347]"
+                    >
+                      Open Investor Redemption Page ↗
+                    </a>
+                  </div>
+                </div>
+
+                {/* Phase 4: Finalize Vault Close & Reclaim Rent */}
+                <div className="rounded-lg border border-[#a14343]/30 bg-[#fff8f8] p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-editorial text-[13px] font-semibold text-[#8a2424]">
+                      Phase 4: Finalize Closure & Reclaim Rent
+                    </span>
+                    <span className="rounded bg-[#fae6e6] px-1.5 py-0.5 text-[9px] font-mono font-bold text-[#8a2424]">
+                      Refund ~0.01 SOL
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-[#715454]">
+                    Marks the vault permanently closed and transfers the ~0.01 SOL account rent-exemption back to your wallet.
+                  </p>
+                  {managerAllowed && (
+                    <button
+                      type="button"
+                      onClick={() => void handleFinalizeVaultClose()}
+                      disabled={closingVault || isBusy}
+                      className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-[#a14343] py-2 font-mono text-[11px] font-bold text-white shadow-xs hover:bg-[#863535] disabled:opacity-50"
+                    >
+                      {closingVault ? 'Closing Vault & Reclaiming Rent…' : '🛑 Finalize Vault Closure & Reclaim ~0.01 SOL Rent'}
+                    </button>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         )}

@@ -119,3 +119,36 @@ export function getAdoptedStrategy(vault: string): StrategyOverride | null {
   return disk[v] ?? null;
 }
 
+const CLOSED_VAULTS_FILE = path.join(process.cwd(), '.closed-vaults.json');
+
+function readPersistedClosedVaults(): Record<string, {closedAt: number; reclaimedSol?: string}> {
+  try {
+    if (fs.existsSync(CLOSED_VAULTS_FILE)) {
+      return JSON.parse(fs.readFileSync(CLOSED_VAULTS_FILE, 'utf-8'));
+    }
+  } catch {}
+  return {};
+}
+
+function writePersistedClosedVaults(data: Record<string, {closedAt: number; reclaimedSol?: string}>): void {
+  try {
+    fs.writeFileSync(CLOSED_VAULTS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  } catch {}
+}
+
+export function markVaultClosed(vault: string, reclaimedSol: string = '0.01 SOL'): void {
+  const v = vault.toLowerCase();
+  const disk = readPersistedClosedVaults();
+  disk[v] = {
+    closedAt: Date.now(),
+    reclaimedSol,
+  };
+  writePersistedClosedVaults(disk);
+}
+
+export function isVaultClosed(vault: string): boolean {
+  const v = vault.toLowerCase();
+  const disk = readPersistedClosedVaults();
+  return Boolean(disk[v]);
+}
+

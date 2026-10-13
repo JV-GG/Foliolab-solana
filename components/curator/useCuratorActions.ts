@@ -563,6 +563,29 @@ export function useCuratorActions() {
     [connection, refresh, requireWallet, sendMultiple],
   );
 
+  const closeVault = useCallback(
+    async (vaultAddress: string): Promise<{reclaimedSol?: string}> => {
+      const curator = requireWallet();
+      setAction('publishing');
+      try {
+        const res = await fetch(`/api/vaults/${vaultAddress}/close`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({curator: curator.toBase58()}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to close vault');
+        }
+        await refresh();
+        return {reclaimedSol: data.reclaimedSol || '0.01 SOL'};
+      } finally {
+        setAction('idle');
+      }
+    },
+    [refresh, requireWallet],
+  );
+
   return {
     action,
     createAndSeed,
@@ -574,6 +597,7 @@ export function useCuratorActions() {
     fundGas,
     executeRebalance,
     forceRebalance,
+    closeVault,
   };
 }
 

@@ -42,3 +42,8 @@ next-env.d.ts
 
 # keep the template, not the real keys
 !.env.example
+
+# local runtime state
+.closed-vaults.json
+.proposals.json
+

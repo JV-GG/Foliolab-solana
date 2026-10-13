@@ -44,6 +44,28 @@ export function DetailPanel({vault, connected, onTrade}: Props) {
       {/* Active Governance Proposal Card */}
       <GovernanceProposalCard vault={vault} connected={connected} />
 
+      {vault.state === 'CLOSED' && (
+        <div className="mt-8 rounded-xl border border-[#a14343] bg-[#fbf2f2] p-4 text-[12px] text-[#782323]">
+          <div className="flex items-center gap-2 font-bold text-[13px]">
+            <span>🛑</span> Vault Permanently Closed
+          </div>
+          <p className="mt-1 leading-relaxed">
+            This vault has completed liquidation and has closed. All assets were converted into USDC cash. If you hold shares, click <strong>Redeem USDC Capital</strong> below to withdraw your pro-rata USDC cash back to your wallet.
+          </p>
+        </div>
+      )}
+
+      {vault.state !== 'CLOSED' && vault.targets?.length === 1 && vault.targets[0].symbol === 'USDC' && vault.targets[0].targetPercent === 100 && (
+        <div className="mt-8 rounded-xl border border-[#c2b280] bg-[#fffbf0] p-4 text-[12px] text-[#7a6b32]">
+          <div className="flex items-center gap-2 font-bold text-[13px]">
+            <span>⚠️</span> Liquidation in Progress (100% USDC)
+          </div>
+          <p className="mt-1 leading-relaxed">
+            A liquidation plan was adopted for this vault. All stock positions are converted to USDC cash. Investors can withdraw anytime below to reclaim full USDC capital.
+          </p>
+        </div>
+      )}
+
       <div className="grid gap-16 py-12 lg:grid-cols-[minmax(0,1.25fr)_minmax(320px,.75fr)] lg:gap-20">
         <section className="min-w-0">
           <SectionTitle eyebrow="Portfolio Allocation">Holdings & Target Weights</SectionTitle>
@@ -105,7 +127,7 @@ export function DetailPanel({vault, connected, onTrade}: Props) {
           <p className="mt-6 text-[12px] leading-6 text-[#5d6960]">Withdrawals return your proportional share of every held token in kind—including stock tokens and USDC—not a guaranteed cash amount.</p>
           <div className="mt-8 grid gap-3">
             <button type="button" disabled={!connected || !acceptsDeposits} onClick={() => onTrade('invest')} className="folio-button-primary w-full">{!connected ? 'Connect wallet to deposit' : acceptsDeposits ? 'Deposit USDC' : pricesMissing && vault.state === 'ACTIVE' ? 'Deposit unavailable: missing prices' : `Deposits closed · ${vault.state}`}</button>
-            <button type="button" disabled={!hasShares} onClick={() => onTrade('withdraw')} className="folio-button-secondary w-full">{hasShares ? 'Withdraw in kind' : 'No shares to withdraw'}</button>
+            <button type="button" disabled={!hasShares} onClick={() => onTrade('withdraw')} className="folio-button-secondary w-full">{hasShares ? (vault.state === 'CLOSED' ? 'Redeem USDC Capital' : 'Withdraw in kind') : 'No shares to withdraw'}</button>
           </div>
         </aside>
       </div>

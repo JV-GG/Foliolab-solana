@@ -21,7 +21,7 @@ import {
   REBALANCE_INTERVAL_SECONDS,
 } from '@/lib/solana/program';
 import {tokenByMint} from '@/lib/solana/config';
-import {isProposalClosed, getAdoptedStrategy} from '@/lib/vaults/proposals';
+import {isProposalClosed, getAdoptedStrategy, isVaultClosed} from '@/lib/vaults/proposals';
 
 export const VAULT_STATES = ['DRAFT', 'SEEDED', 'ACTIVE', 'PAUSED', 'CLOSED'] as const;
 /** Shares use the settlement token's decimals (USDC: 6). */
@@ -269,7 +269,8 @@ export async function readVault(vaultParam: string, account?: PublicKey, prices?
   }
 
 
-  const state = vaultStateName(v.state as Record<string, unknown>).toUpperCase() as VaultView['state'];
+  const rawState = vaultStateName(v.state as Record<string, unknown>).toUpperCase() as VaultView['state'];
+  const state = isVaultClosed(address.toBase58()) ? 'CLOSED' : rawState;
   return {
     address: address.toBase58(),
     index: v.index.toNumber(),
