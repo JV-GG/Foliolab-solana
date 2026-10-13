@@ -119,13 +119,15 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
     return tokens.filter((t) => pickedSet.has(t.mint));
   }, [tokens, pickedRwaMints]);
 
-  // Target weights initialization: honor on-chain targets or distribute 100% across picked RWA tokens
+  const usdcToken = useMemo(() => tokens.find((t) => t.symbol === 'USDC'), [tokens]);
+
+  // Target weights initialization: default 100% USDC (all picked RWA stocks start at 0%), or honor on-chain targets
   const initialWeights = useMemo(() => {
     const map: Record<string, number> = {};
     if (vault.targets && vault.targets.length > 0) {
       let matchCount = 0;
       for (const t of vault.targets) {
-        if (step3Tokens.some((st) => st.mint === t.asset)) {
+        if (t.symbol !== 'USDC' && step3Tokens.some((st) => st.mint === t.asset)) {
           map[t.asset] = t.targetPercent;
           matchCount++;
         }
@@ -133,18 +135,10 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
       if (matchCount > 0) return map;
     }
 
-    if (step3Tokens.length === 0) return map;
-
-    // Distribute 100% equally among the picked RWA tokens
-    const perToken = Math.floor(100 / step3Tokens.length);
-    let distributed = 0;
-    step3Tokens.forEach((rwa, idx) => {
-      const isLast = idx === step3Tokens.length - 1;
-      const weight = isLast ? 100 - distributed : perToken;
-      map[rwa.mint] = weight;
-      distributed += weight;
-    });
-
+    // Default 100% USDC -> all picked RWA stock tokens start at 0%
+    for (const rwa of step3Tokens) {
+      map[rwa.mint] = 0;
+    }
     return map;
   }, [vault.targets, step3Tokens]);
 
@@ -162,38 +156,66 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
   const isDraftOrSeeded = vault.state === 'DRAFT' || vault.state === 'SEEDED';
   const isActive = vault.state === 'ACTIVE';
 
-  const totalPercent = useMemo(() => {
-    return Object.values(weights).reduce((sum, v) => sum + (Number(v) || 0), 0);
-  }, [weights]);
+  // RWA stock allocations total
+  const rwaTotalPercent = useMemo(() => {
+    return step3Tokens.reduce((sum, token) => sum + (Number(weights[token.mint]) || 0), 0);
+  }, [step3Tokens, weights]);
 
-  const validWeights = Math.abs(totalPercent - 100) < 0.01;
+  // USDC automatically absorbs whatever percentage is left
+  const usdcPercent = Math.max(0, 100 - rwaTotalPercent);
+  const totalPercent = 100;
+  const validWeights = rwaTotalPercent <= 100;
   const publishing = action === 'publishing';
 
   const targetsPayload = useMemo(() => {
-    return Object.entries(weights)
-      .filter(([, pct]) => Number(pct) > 0)
-      .map(([mint, pct]) => ({
-        mint: new PublicKey(mint),
-        targetBps: Math.round(Number(pct) * 100),
-      }));
-  }, [weights]);
+    const list: {mint: PublicKey; targetBps: number}[] = [];
+    if (usdcToken && usdcPercent > 0) {
+      list.push({
+        mint: new PublicKey(usdcToken.mint),
+        targetBps: Math.round(usdcPercent * 100),
+      });
+    }
+    for (const token of step3Tokens) {
+      const pct = Number(weights[token.mint]) || 0;
+      if (pct > 0) {
+        list.push({
+          mint: new PublicKey(token.mint),
+          targetBps: Math.round(pct * 100),
+        });
+      }
+    }
+    const sumBps = list.reduce((s, x) => s + x.targetBps, 0);
+    if (list.length > 0 && sumBps !== 10000) {
+      list[0].targetBps += 10000 - sumBps;
+    }
+    return list;
+  }, [usdcToken, usdcPercent, step3Tokens, weights]);
 
   async function handleForceRebalance() {
     if (!managerAllowed || !isActive || rebalancePending) return;
     setRebalanceError(null);
     setRebalancePending(true);
     try {
-      const customTargetsList: TargetWeight[] = Object.entries(weights)
-        .filter(([, pct]) => Number(pct) > 0)
-        .map(([asset, pct]) => {
-          const info = tokens.find((t) => t.mint === asset);
-          return {
-            asset,
-            symbol: info?.symbol ?? `${asset.slice(0, 4)}…${asset.slice(-4)}`,
-            targetBps: Math.round(Number(pct) * 100),
-            targetPercent: Number(pct),
-          };
+      const customTargetsList: TargetWeight[] = [];
+      if (usdcToken && usdcPercent > 0) {
+        customTargetsList.push({
+          asset: usdcToken.mint,
+          symbol: 'USDC',
+          targetBps: Math.round(usdcPercent * 100),
+          targetPercent: usdcPercent,
         });
+      }
+      for (const token of step3Tokens) {
+        const pct = Number(weights[token.mint]) || 0;
+        if (pct > 0) {
+          customTargetsList.push({
+            asset: token.mint,
+            symbol: token.symbol,
+            targetBps: Math.round(pct * 100),
+            targetPercent: pct,
+          });
+        }
+      }
       const res = await forceRebalance(vault, customTargetsList.length > 0 ? customTargetsList : undefined);
       const count = res.trades?.length ?? 1;
       if (vault.openProposal) {
@@ -653,38 +675,82 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
               <label className="text-[10px] font-bold uppercase tracking-wider text-[#6b746c]">
                 Target Asset Weights
               </label>
-              <span
-                className={`font-mono text-[11px] font-bold ${
-                  validWeights ? 'text-[#237b68]' : 'text-[#6b746c]'
-                }`}
-              >
-                Total: {totalPercent}% / 100% {validWeights ? '✓' : `(${100 - totalPercent}% free)`}
+              <span className="font-mono text-[11px] font-bold text-[#237b68]">
+                Total: 100% ✓ · USDC Cash: {usdcPercent}%
               </span>
             </div>
 
             <div className="flex items-center justify-between text-[10px] text-[#717b72]">
-              <span>Adjust weights within remaining 0–100% headroom.</span>
-              <button
-                type="button"
-                disabled={!managerAllowed || publishing}
-                onClick={() => {
-                  if (step3Tokens.length === 0) return;
-                  const perToken = Math.floor(100 / step3Tokens.length);
-                  const rem = 100 - (perToken * step3Tokens.length);
-                  const next: Record<string, number> = {};
-                  step3Tokens.forEach((t, i) => {
-                    next[t.mint] = perToken + (i === 0 ? rem : 0);
-                  });
-                  setWeights(next);
-                }}
-                className="font-medium text-[#237b68] hover:underline"
-              >
-                Equally balance all ({step3Tokens.length})
-              </button>
+              <span>Adjust stock allocations; remaining percentage stays in USDC cash automatically.</span>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  disabled={!managerAllowed || publishing}
+                  onClick={() => {
+                    const next: Record<string, number> = {};
+                    step3Tokens.forEach((t) => { next[t.mint] = 0; });
+                    setWeights(next);
+                  }}
+                  className="text-[#717b72] hover:text-[#253328] hover:underline"
+                >
+                  Reset to 100% USDC
+                </button>
+                <button
+                  type="button"
+                  disabled={!managerAllowed || publishing || step3Tokens.length === 0}
+                  onClick={() => {
+                    if (step3Tokens.length === 0) return;
+                    const perToken = Math.floor(100 / step3Tokens.length);
+                    const rem = 100 - (perToken * step3Tokens.length);
+                    const next: Record<string, number> = {};
+                    step3Tokens.forEach((t, i) => {
+                      next[t.mint] = perToken + (i === 0 ? rem : 0);
+                    });
+                    setWeights(next);
+                  }}
+                  className="font-medium text-[#237b68] hover:underline"
+                >
+                  Equally balance stocks (0% USDC)
+                </button>
+              </div>
             </div>
 
             {/* Target Weight Sliders */}
             <div className="space-y-2.5">
+              {/* Read-Only Auto-Calculated USDC Cash Card */}
+              <div className="rounded-xl border border-[#237b68]/30 bg-[#f0f7f4] p-3 shadow-2xs">
+                <div className="flex items-center justify-between text-[11px]">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#237b68] font-mono text-[10px] font-bold text-white shadow-xs">
+                      $
+                    </span>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <strong className="text-[#253328]">USDC</strong>
+                        <span className="rounded bg-[#dfede8] px-1.5 py-0.2 font-mono text-[9px] font-semibold text-[#237b68]">
+                          Settlement Cash · Auto-Calculated
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-[#59645c]">
+                        Unallocated fund balance remains in USDC cash reserve.
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-mono text-[15px] font-extrabold text-[#237b68]">
+                      {usdcPercent}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* Visual Distribution Progress Bar for USDC */}
+                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#dce1da]">
+                  <div
+                    className="h-full rounded-full bg-[#237b68] transition-all duration-200"
+                    style={{width: `${usdcPercent}%`}}
+                  />
+                </div>
+              </div>
               {step3Tokens.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-[#cdd3ca] p-3 text-center text-[11px] text-[#717b72]">
                   No RWA tokens were picked for this vault.
