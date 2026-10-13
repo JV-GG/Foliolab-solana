@@ -768,8 +768,7 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                     <div key={token.mint} className="rounded-lg border border-[#e2e6df] bg-white p-2.5 shadow-sm">
                       <div className="flex items-center justify-between text-[11px]">
                         <div>
-                          <strong className="text-[#253328]">{token.symbol}</strong>
-                          <span className="ml-1 text-[10px] text-[#717b72]">({token.name})</span>
+                          <strong className="text-[#253328] font-mono">{token.symbol}</strong>
                         </div>
                         <div className="flex items-center gap-1">
                           <input

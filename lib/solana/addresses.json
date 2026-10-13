@@ -67,11 +67,52 @@
         "mint": "5qEVYEWHpL7sxuBH3EMHnNzjHfnUSMujuCbgfMNbxTH5",
         "decimals": 8,
         "underlying": "TSLA"
+      },
+      {
+        "symbol": "MSFTx",
+        "name": "Microsoft (mock xStock)",
+        "mint": "3BK68WoavuWbpsjncHaTWUWBPx3V9MhRgMnmjgAECwAt",
+        "decimals": 8,
+        "underlying": "MSFT"
+      },
+      {
+        "symbol": "AMZNx",
+        "name": "Amazon (mock xStock)",
+        "mint": "HPGpcUji5bWDe8qzWmJae3sAMVeBzU12h9KRWtNeoG4E",
+        "decimals": 8,
+        "underlying": "AMZN"
+      },
+      {
+        "symbol": "GOOGLx",
+        "name": "Alphabet (mock xStock)",
+        "mint": "2DRN2q4Y3vHzKWdErnGkpG7xyiu6HDR5gwHqjACQRXqV",
+        "decimals": 8,
+        "underlying": "GOOGL"
+      },
+      {
+        "symbol": "METAx",
+        "name": "Meta (mock xStock)",
+        "mint": "3SgQ7KcDdQBJMBLA5gJYgxb6FwpNu9TzjwWjhrJCKVuZ",
+        "decimals": 8,
+        "underlying": "META"
+      },
+      {
+        "symbol": "SPYx",
+        "name": "S&P 500 (mock xStock)",
+        "mint": "D2RfYGv16AQL7NgXwjmhYMcvSPBcmktqE9DwfCndLFPw",
+        "decimals": 8,
+        "underlying": "SPY"
+      },
+      {
+        "symbol": "COINx",
+        "name": "Coinbase (mock xStock)",
+        "mint": "GLELH7F3HHP8qoQFh5HiiC4TUSjAtZDhtGy7wUfBDyB",
+        "decimals": 8,
+        "underlying": "COIN"
       }
     ],
     "vaults": [
       "67rk8UrKidmPj9ajLKbsX7qyHdgzhqxD9EGyUrgNUN39"
-    ],
-    "lookupTable": "3pmuDjKKNFLweHAdodw1czeDzd55vYm2Lv3uQxW1S5bg"
+    ]
   }
 }

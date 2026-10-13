@@ -79,6 +79,12 @@ const STOCKS = [
   {symbol: 'AAPLx', name: 'Apple (mock xStock)', underlying: 'AAPL', token2022: true, demoPrice: 255},
   {symbol: 'NVDAx', name: 'NVIDIA (mock xStock)', underlying: 'NVDA', token2022: false, demoPrice: 185},
   {symbol: 'TSLAx', name: 'Tesla (mock xStock)', underlying: 'TSLA', token2022: true, demoPrice: 430},
+  {symbol: 'MSFTx', name: 'Microsoft (mock xStock)', underlying: 'MSFT', token2022: true, demoPrice: 420},
+  {symbol: 'AMZNx', name: 'Amazon (mock xStock)', underlying: 'AMZN', token2022: false, demoPrice: 190},
+  {symbol: 'GOOGLx', name: 'Alphabet (mock xStock)', underlying: 'GOOGL', token2022: true, demoPrice: 175},
+  {symbol: 'METAx', name: 'Meta (mock xStock)', underlying: 'META', token2022: false, demoPrice: 510},
+  {symbol: 'SPYx', name: 'S&P 500 (mock xStock)', underlying: 'SPY', token2022: true, demoPrice: 580},
+  {symbol: 'COINx', name: 'Coinbase (mock xStock)', underlying: 'COIN', token2022: false, demoPrice: 220},
 ];
 const USDC_UNIT = BigInt(1_000_000);
 const STOCK_UNIT = BigInt(100_000_000);

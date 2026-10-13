@@ -12,7 +12,17 @@ import {CLUSTER, tokenByMint} from '@/lib/solana/config';
 import {ApiError} from '@/lib/chain/server';
 import {DEFAULT_MAX_DIVERGENCE_BPS, judgeQuote, type PriceRules} from './rules';
 
-const STATIC_PRICES: Record<string, string> = {AAPL: '255.00', NVDA: '185.00', TSLA: '430.00'};
+const STATIC_PRICES: Record<string, string> = {
+  AAPL: '255.00',
+  NVDA: '185.00',
+  TSLA: '430.00',
+  MSFT: '420.00',
+  AMZN: '190.00',
+  GOOGL: '175.00',
+  META: '510.00',
+  SPY: '580.00',
+  COIN: '220.00',
+};
 
 export interface Quote {
   mint: string;

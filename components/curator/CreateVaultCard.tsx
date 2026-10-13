@@ -29,33 +29,24 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
   // Filter on-chain allowlisted RWA tokens (excluding USDC settlement currency)
   const rwaTokens = useMemo(() => allTokens.filter((t) => t.symbol !== 'USDC'), [allTokens]);
   const [selectedMints, setSelectedMints] = useState<string[]>([]);
-  const [dropboxMint, setDropboxMint] = useState<string>('');
+  // Search state for stock ID filter
+  const [search, setSearch] = useState('');
 
-  // Tokens available in the dropdown (not yet added to fund plan)
-  const availableOptions = useMemo(() => {
-    return rwaTokens.filter((t) => !selectedMints.includes(t.mint));
-  }, [rwaTokens, selectedMints]);
+  // Filtered RWA tokens based on search input
+  const filteredTokens = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rwaTokens;
+    return rwaTokens.filter(
+      (t) =>
+        t.symbol.toLowerCase().includes(q) ||
+        (t.underlying && t.underlying.toLowerCase().includes(q))
+    );
+  }, [rwaTokens, search]);
 
-  // Keep dropdown defaulted to the first available option
-  useEffect(() => {
-    if (availableOptions.length > 0 && (!dropboxMint || !availableOptions.some((o) => o.mint === dropboxMint))) {
-      setDropboxMint(availableOptions[0].mint);
-    } else if (availableOptions.length === 0) {
-      setDropboxMint('');
-    }
-  }, [availableOptions, dropboxMint]);
-
-  function handleAddTokenFromDropbox() {
-    if (!dropboxMint) return;
-    if (!selectedMints.includes(dropboxMint)) {
-      setSelectedMints((prev) => [...prev, dropboxMint]);
-      const token = rwaTokens.find((t) => t.mint === dropboxMint);
-      notify(`Added ${token?.symbol ?? 'token'} to fund plan.`);
-    }
-  }
-
-  function handleRemoveToken(mint: string) {
-    setSelectedMints((prev) => prev.filter((m) => m !== mint));
+  function toggleToken(mint: string) {
+    setSelectedMints((prev) =>
+      prev.includes(mint) ? prev.filter((m) => m !== mint) : [...prev, mint]
+    );
   }
 
   function handleAddAll() {
@@ -76,7 +67,7 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
     if (cleanName.length < 2) return notify('Give the vault a name of at least two characters.');
     if (!/^[A-Z0-9]{2,8}$/.test(cleanSymbol)) return notify('Use a 2–8 character symbol made from letters and numbers.');
     if (!/^\d+(\.\d+)?$/.test(seed) || Number(seed) < 10) return notify('The first deposit must be at least 10 USDC.');
-    if (selectedMints.length === 0) return notify('Please pick at least one RWA stock token from the dropdown for your fund plan.');
+    if (selectedMints.length === 0) return notify('Please pick at least one RWA stock token from the list for your fund plan.');
 
     try {
       const vault = await onCreate(cleanName, cleanSymbol, seed);
@@ -157,7 +148,7 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
           </span>
         </label>
 
-        {/* On-chain RWA Asset Selection via Dropbox */}
+        {/* On-chain RWA Asset Selection: Search + 3-Column Grid */}
         <div className="space-y-3 rounded-2xl border border-[#cdd3ca] bg-[#f8faf6] p-4">
           <div className="flex items-center justify-between">
             <div>
@@ -165,7 +156,7 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
                 Fund Plan Asset Universe
               </span>
               <h4 className="font-editorial text-[14px] font-semibold text-[#253328]">
-                Pick RWA Tokens (Stock Basket)
+                Pick RWA Stock Tokens
               </h4>
             </div>
             <span className="font-mono text-[10px] font-semibold text-[#237b68]">
@@ -174,47 +165,74 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
           </div>
 
           <p className="text-[11px] leading-relaxed text-[#6b746c]">
-            Use the dropdown to pick which tokenized stocks are allowed in this fund plan.
+            Select which on-chain stock tokens will be allowed in this fund plan.
           </p>
 
-          {/* Dropbox / Select input */}
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <select
-                value={dropboxMint}
-                onChange={(e) => setDropboxMint(e.target.value)}
-                disabled={busy || availableOptions.length === 0}
-                className="w-full appearance-none rounded-[14px] border border-[#aeb8ad] bg-white px-3.5 py-2.5 pr-8 font-mono text-[12px] font-semibold text-[#2b3a30] shadow-xs outline-none focus:border-[#237b68] disabled:opacity-50"
+          {/* Search bar on top */}
+          <div className="relative">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search stock ID (e.g. AAPL, NVDA)..."
+              disabled={busy}
+              className="w-full rounded-[12px] border border-[#aeb8ad] bg-white px-3 py-2 pl-8 font-mono text-[11px] text-[#2b3a30] shadow-2xs outline-none focus:border-[#237b68] disabled:opacity-50"
+            />
+            <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] text-[#717b72]">
+              🔍
+            </span>
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-[#717b72] hover:text-[#2b3a30]"
               >
-                {availableOptions.length === 0 ? (
-                  <option value="">All available RWA tokens already added</option>
-                ) : (
-                  <>
-                    <option value="" disabled>-- Select an RWA stock token --</option>
-                    {availableOptions.map((token) => (
-                      <option key={token.mint} value={token.mint}>
-                        {token.symbol} · {token.name} ({token.underlying || 'Stock'})
-                      </option>
-                    ))}
-                  </>
-                )}
-              </select>
-              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#717b72]">
-                ▼
-              </span>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleAddTokenFromDropbox}
-              disabled={busy || !dropboxMint || availableOptions.length === 0}
-              className="folio-button-primary shrink-0 py-2.5 px-3.5 text-[11px] disabled:opacity-50"
-            >
-              + Add to Plan
-            </button>
+                ✕
+              </button>
+            )}
           </div>
 
-          {/* Quick action buttons */}
+          {/* 3-Column Grid limited in size */}
+          <div className="max-h-48 overflow-y-auto rounded-xl border border-[#d8ded6] bg-white p-2">
+            {filteredTokens.length === 0 ? (
+              <div className="p-3 text-center text-[11px] text-[#717b72]">
+                No matching stock token found.
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-1.5">
+                {filteredTokens.map((token) => {
+                  const isSelected = selectedMints.includes(token.mint);
+                  return (
+                    <button
+                      key={token.mint}
+                      type="button"
+                      onClick={() => toggleToken(token.mint)}
+                      disabled={busy}
+                      title={token.symbol}
+                      className={`flex items-center justify-between rounded-lg px-2.5 py-2 text-left font-mono text-[12px] font-semibold transition-all border ${
+                        isSelected
+                          ? 'border-[#237b68] bg-[#edf6f2] text-[#185347] shadow-2xs'
+                          : 'border-[#e5e9e3] bg-white text-[#2b3a30] hover:border-[#237b68]/50 hover:bg-[#fbfcfb]'
+                      }`}
+                    >
+                      <span className="truncate">{token.symbol}</span>
+                      <span
+                        className={`ml-1 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full text-[8px] font-bold ${
+                          isSelected
+                            ? 'bg-[#237b68] text-white'
+                            : 'border border-[#cdd3ca] text-transparent'
+                        }`}
+                      >
+                        ✓
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Quick action links */}
           {rwaTokens.length > 1 && (
             <div className="flex items-center justify-between text-[10px]">
               <button
@@ -223,7 +241,7 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
                 disabled={busy || selectedMints.length === rwaTokens.length}
                 className="text-[#237b68] underline hover:text-[#185347] disabled:opacity-40"
               >
-                + Add all available tokens
+                + Select all ({rwaTokens.length})
               </button>
               {selectedMints.length > 0 && (
                 <button
@@ -232,59 +250,44 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
                   disabled={busy}
                   className="text-[#a14343] hover:underline"
                 >
-                  Clear selection
+                  Clear all
                 </button>
               )}
             </div>
           )}
 
-          {/* Picked Tokens in Fund Plan */}
+          {/* Picked Tokens summary chips (stock ID only) */}
           <div className="mt-2 space-y-1.5">
             <span className="text-[9px] font-bold uppercase tracking-wider text-[#717b72]">
-              Picked Tokens in Fund Plan ({selectedMints.length})
+              Picked in Fund Plan ({selectedMints.length})
             </span>
 
             {selectedMints.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-[#b8c0b7] p-3 text-center text-[11px] text-[#717b72]">
-                No RWA tokens picked yet. Select a token from the dropdown above and click &quot;+ Add to Plan&quot;.
+              <div className="rounded-xl border border-dashed border-[#b8c0b7] p-2.5 text-center text-[11px] text-[#717b72]">
+                No stock tokens picked yet. Click tokens in the 3-column grid above to add them.
               </div>
             ) : (
-              <div className="grid gap-1.5">
+              <div className="flex flex-wrap gap-1.5">
                 {selectedMints.map((mint) => {
                   const token = rwaTokens.find((t) => t.mint === mint);
                   if (!token) return null;
                   return (
-                    <div
+                    <span
                       key={token.mint}
-                      className="flex items-center justify-between rounded-xl border border-[#237b68]/30 bg-white p-2.5 shadow-2xs"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-[#237b68]/30 bg-white px-2.5 py-1 font-mono text-[11px] font-semibold text-[#253328] shadow-2xs"
                     >
-                      <div className="flex items-center gap-2.5">
-                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#dfede8] font-mono text-[10px] font-bold text-[#237b68]">
-                          ✓
-                        </span>
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <strong className="font-mono text-xs text-[#2b3a30]">{token.symbol}</strong>
-                            {token.underlying && (
-                              <span className="rounded bg-[#e8ece7] px-1 py-0.2 font-mono text-[9px] text-[#59645c]">
-                                {token.underlying}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[10px] text-[#717b72]">{token.name}</div>
-                        </div>
-                      </div>
-
+                      <span className="h-1.5 w-1.5 rounded-full bg-[#237b68]" />
+                      {token.symbol}
                       <button
                         type="button"
-                        onClick={() => handleRemoveToken(token.mint)}
+                        onClick={() => toggleToken(token.mint)}
                         disabled={busy}
-                        className="rounded-lg border border-[#e2e6df] px-2 py-1 font-mono text-[10px] text-[#a14343] hover:border-[#a14343] hover:bg-[#fbf2f2]"
-                        title="Remove from fund plan"
+                        className="ml-1 text-[#a14343] hover:text-[#7d2f2f]"
+                        title="Remove"
                       >
-                        ✕ Remove
+                        ✕
                       </button>
-                    </div>
+                    </span>
                   );
                 })}
               </div>
