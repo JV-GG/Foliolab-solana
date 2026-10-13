@@ -253,10 +253,10 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
                   </button>
                 </div>
 
-                {/* 3-Column Grid inside the popup */}
-                <div className="max-h-52 overflow-y-auto rounded-xl border border-[#e5ebe3] bg-[#fcfdfa] p-2">
+                {/* 3-Column Grid inside the popup: fixed to 2 rows height with scroll */}
+                <div className="max-h-[90px] overflow-y-auto rounded-xl border border-[#e5ebe3] bg-[#fcfdfa] p-1.5">
                   {filteredTokens.length === 0 ? (
-                    <div className="p-4 text-center text-[11px] text-[#717b72]">
+                    <div className="p-3 text-center text-[11px] text-[#717b72]">
                       {filterTab === 'selected'
                         ? 'No assets selected yet. Switch to "All" to pick assets.'
                         : 'No matching asset found.'}
@@ -273,7 +273,7 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
                             onClick={() => toggleToken(token.mint)}
                             disabled={busy}
                             title={token.name}
-                            className={`flex items-center justify-between rounded-lg px-2.5 py-2 text-left font-mono text-[12px] font-semibold transition-all border ${
+                            className={`flex h-9 items-center justify-between rounded-lg px-2.5 text-left font-mono text-[12px] font-semibold transition-all border ${
                               isSelected
                                 ? 'border-[#237b68] bg-[#edf6f2] text-[#185347] shadow-2xs ring-1 ring-[#237b68]/40'
                                 : 'border-[#e2e7df] bg-white text-[#2b3a30] hover:border-[#237b68]/40 hover:bg-[#fbfcfb]'
