@@ -22,6 +22,9 @@ const STATIC_PRICES: Record<string, string> = {
   META: '510.00',
   SPY: '580.00',
   COIN: '220.00',
+  SOL: '180.00',
+  BTC: '92000.00',
+  ETH: '3400.00',
 };
 
 export interface Quote {

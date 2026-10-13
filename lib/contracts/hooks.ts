@@ -38,7 +38,34 @@ export type {VaultView, Holding} from '@/lib/vaults/read';
 
 export const VAULTS_KEY = 'vaults';
 const SYSVAR_INSTRUCTIONS = new PublicKey('Sysvar1nstructions1111111111111111111111111');
-/** Fetches allowlisted RWA tokens directly from the Solana registry on-chain. */
+export const POPULAR_CRYPTO_TOKENS: TokenInfo[] = [
+  {
+    symbol: 'SOL',
+    name: 'Solana',
+    mint: 'So11111111111111111111111111111111111111112',
+    decimals: 9,
+    underlying: 'SOL',
+    category: 'crypto',
+  },
+  {
+    symbol: 'BTC',
+    name: 'Bitcoin',
+    mint: 'cbbtcf3aa214zXHbiAZQwf4122FmVbraDgTagqLdBKh',
+    decimals: 8,
+    underlying: 'BTC',
+    category: 'crypto',
+  },
+  {
+    symbol: 'ETH',
+    name: 'Ethereum',
+    mint: '7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs',
+    decimals: 8,
+    underlying: 'ETH',
+    category: 'crypto',
+  },
+];
+
+/** Fetches allowlisted RWA tokens directly from the Solana registry on-chain, plus supported crypto. */
 export function useOnChainTokens() {
   const {connection} = useSolanaConnection();
   return useQuery({
@@ -68,14 +95,26 @@ export function useOnChainTokens() {
             mint: mintStr,
             decimals: 8,
           };
-          if (!results.some((r) => r.mint === info.mint)) {
-            results.push(info);
+          const categorized: TokenInfo = {
+            ...info,
+            category: (info.category as 'rwa' | 'crypto') ?? 'rwa',
+          };
+          if (!results.some((r) => r.mint === categorized.mint)) {
+            results.push(categorized);
           }
         }
+
+        // Add supported crypto assets
+        for (const crypto of POPULAR_CRYPTO_TOKENS) {
+          if (!results.some((r) => r.mint === crypto.mint)) {
+            results.push(crypto);
+          }
+        }
+
         return results;
       } catch (err) {
         console.warn('Failed to fetch on-chain tokens from registry, fallback to config:', err);
-        return deployment().tokens;
+        return [...deployment().tokens, ...POPULAR_CRYPTO_TOKENS];
       }
     },
     staleTime: 60_000,

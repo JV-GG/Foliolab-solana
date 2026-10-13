@@ -14,6 +14,7 @@ export interface TokenInfo {
   decimals: number;
   /** Ticker of the real stock this mock tracks, used to price it ("AAPL"). Absent for USDC. */
   underlying?: string;
+  category?: 'rwa' | 'crypto';
 }
 
 export interface Deployment {

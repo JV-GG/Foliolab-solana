@@ -1,6 +1,6 @@
 'use client';
 
-import {useState, useEffect, useMemo, type FormEvent} from 'react';
+import {useState, useEffect, useMemo, useRef, type FormEvent} from 'react';
 import {useNotify} from '@/components/Toast';
 import {explainError, useOnChainTokens} from '@/lib/contracts/hooks';
 import type {CuratorAction} from './useCuratorActions';
@@ -26,18 +26,42 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
   const [symbol, setSymbol] = useState('');
   const [seed, setSeed] = useState('10');
 
-  // Filter on-chain allowlisted RWA tokens (excluding USDC settlement currency)
-  const rwaTokens = useMemo(() => allTokens.filter((t) => t.symbol !== 'USDC'), [allTokens]);
+  // Filter on-chain allowlisted RWA and Crypto tokens (excluding USDC settlement currency)
+  const availableTokens = useMemo(() => allTokens.filter((t) => t.symbol !== 'USDC'), [allTokens]);
   const [selectedMints, setSelectedMints] = useState<string[]>([]);
-  // Sliding dropdown state
+  // Sliding dropdown popup state
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [filterTab, setFilterTab] = useState<'all' | 'selected'>('all');
+  const [filterTab, setFilterTab] = useState<'all' | 'rwa' | 'crypto' | 'selected'>('all');
   const [search, setSearch] = useState('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Filtered RWA tokens based on search input and filter tab
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const rwaCount = useMemo(
+    () => availableTokens.filter((t) => t.category !== 'crypto').length,
+    [availableTokens]
+  );
+  const cryptoCount = useMemo(
+    () => availableTokens.filter((t) => t.category === 'crypto').length,
+    [availableTokens]
+  );
+
+  // Filtered tokens based on search input and category tab
   const filteredTokens = useMemo(() => {
-    let list = rwaTokens;
-    if (filterTab === 'selected') {
+    let list = availableTokens;
+    if (filterTab === 'rwa') {
+      list = list.filter((t) => t.category !== 'crypto');
+    } else if (filterTab === 'crypto') {
+      list = list.filter((t) => t.category === 'crypto');
+    } else if (filterTab === 'selected') {
       list = list.filter((t) => selectedMints.includes(t.mint));
     }
     const q = search.trim().toLowerCase();
@@ -47,7 +71,7 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
         t.symbol.toLowerCase().includes(q) ||
         (t.underlying && t.underlying.toLowerCase().includes(q))
     );
-  }, [rwaTokens, filterTab, search, selectedMints]);
+  }, [availableTokens, filterTab, search, selectedMints]);
 
   function toggleToken(mint: string) {
     setSelectedMints((prev) =>
@@ -56,8 +80,8 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
   }
 
   function handleAddAll() {
-    setSelectedMints(rwaTokens.map((t) => t.mint));
-    notify(`Added all ${rwaTokens.length} stock tokens to fund plan.`);
+    setSelectedMints(availableTokens.map((t) => t.mint));
+    notify(`Added all ${availableTokens.length} assets to fund plan.`);
   }
 
   function handleClearAll() {
@@ -73,7 +97,7 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
     if (cleanName.length < 2) return notify('Give the vault a name of at least two characters.');
     if (!/^[A-Z0-9]{2,8}$/.test(cleanSymbol)) return notify('Use a 2–8 character symbol made from letters and numbers.');
     if (!/^\d+(\.\d+)?$/.test(seed) || Number(seed) < 10) return notify('The first deposit must be at least 10 USDC.');
-    if (selectedMints.length === 0) return notify('Please pick at least one RWA stock token from the list for your fund plan.');
+    if (selectedMints.length === 0) return notify('Please pick at least one asset from the list for your fund plan.');
 
     try {
       const vault = await onCreate(cleanName, cleanSymbol, seed);
@@ -95,7 +119,7 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
       setSymbol('');
       setSeed('10');
       onCreated(vault);
-      notify('Vault created and seeded with chosen RWA tokens. It is waiting for Guardian activation.');
+      notify('Vault created and seeded with chosen assets. It is waiting for Guardian activation.');
     } catch (error) {
       notify(explainError(error));
     }
@@ -154,140 +178,143 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
           </span>
         </label>
 
-        {/* Collapsible Sliding Dropdown for Asset Selection */}
-        <div className="rounded-2xl border border-[#cdd3ca] bg-[#f8faf6] overflow-hidden transition-all duration-200">
-          {/* Dropdown Header / Trigger */}
-          <button
-            type="button"
-            onClick={() => setDropdownOpen((prev) => !prev)}
-            disabled={busy}
-            className="flex w-full items-center justify-between p-4 text-left hover:bg-[#f2f5f0] transition-colors"
-          >
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#59645c]">
-                  Fund Plan Asset Universe
-                </span>
-                <span className="rounded-full bg-[#dfede8] px-2 py-0.5 font-mono text-[10px] font-bold text-[#237b68]">
-                  {selectedMints.length} of {rwaTokens.length} picked
-                </span>
-              </div>
-              <h4 className="mt-1 font-editorial text-[14px] font-semibold text-[#253328]">
-                {selectedMints.length === 0
-                  ? 'Select RWA Stock Tokens…'
-                  : `${selectedMints.length} Stock Token${selectedMints.length > 1 ? 's' : ''} in Fund Basket`}
-              </h4>
+        {/* Asset Selection: Search Bar with Pop-up Sliding Dropdown */}
+        <div ref={dropdownRef} className="relative grid gap-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#59645c]">
+              Fund Plan Asset Universe (RWA & Crypto)
+            </span>
+            <span className="font-mono text-[10px] font-semibold text-[#237b68]">
+              {selectedMints.length} of {availableTokens.length} picked
+            </span>
+          </div>
 
-              {/* Compact badges when dropdown is collapsed */}
-              {!dropdownOpen && selectedMints.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {selectedMints.slice(0, 6).map((mint) => {
-                    const token = rwaTokens.find((t) => t.mint === mint);
-                    return (
-                      <span
-                        key={mint}
-                        className="rounded-md border border-[#d8ded6] bg-white px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#2b3a30]"
-                      >
-                        {token?.symbol ?? 'Asset'}
-                      </span>
-                    );
-                  })}
-                  {selectedMints.length > 6 && (
-                    <span className="self-center font-mono text-[10px] text-[#717b72]">
-                      +{selectedMints.length - 6} more
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="ml-3 flex items-center gap-1.5 shrink-0">
-              <span className="text-[11px] font-semibold text-[#237b68]">
-                {dropdownOpen ? 'Collapse ▲' : 'Open Dropdown ▼'}
+          {/* Search input container that triggers pop-up sliding dropdown */}
+          <div className="relative">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                if (!dropdownOpen) setDropdownOpen(true);
+              }}
+              onFocus={() => setDropdownOpen(true)}
+              placeholder="Search & pick assets (e.g. AAPLx, SOL, NVDAx, BTC)..."
+              disabled={busy}
+              className="w-full rounded-[14px] border border-[#aeb8ad] bg-[#fcfdf9]/70 py-3 pl-9 pr-9 font-mono text-[13px] text-[#2b3a30] shadow-2xs outline-none focus:border-[#237b68] disabled:opacity-55"
+            />
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-[#717b72]">
+              🔍
+            </span>
+            <button
+              type="button"
+              onClick={() => setDropdownOpen((prev) => !prev)}
+              disabled={busy}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-xs text-[#717b72] hover:text-[#2b3a30]"
+              title={dropdownOpen ? 'Close popup' : 'Open popup'}
+            >
+              <span className={`inline-block transition-transform duration-200 ${dropdownOpen ? 'rotate-180' : ''}`}>
+                ▼
               </span>
-            </div>
-          </button>
+            </button>
+          </div>
 
-          {/* Sliding Dropdown Content Panel */}
+          {/* Pop-up Sliding Dropdown Panel */}
           {dropdownOpen && (
-            <div className="border-t border-[#cdd3ca] bg-[#fdfdfc] p-4 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-[11px] leading-relaxed text-[#6b746c]">
-                  Pick from allowlisted on-chain stock tokens. Fits thousands of assets with live filter.
-                </p>
-                {/* Tabs: All vs Selected */}
-                <div className="flex items-center rounded-lg border border-[#d8ded6] bg-[#f4f7f2] p-0.5 text-[10px] font-semibold shrink-0">
+            <div className="absolute top-[calc(100%+6px)] left-0 right-0 z-40 space-y-3 rounded-2xl border border-[#cdd3ca] bg-white p-3.5 shadow-xl transition-all duration-150 animate-in fade-in slide-in-from-top-2">
+              {/* Filter Tabs & Close Button */}
+              <div className="flex items-center justify-between gap-2 border-b border-[#edf1eb] pb-2.5">
+                <div className="flex items-center gap-1.5 overflow-x-auto text-[10px] font-semibold">
                   <button
                     type="button"
                     onClick={() => setFilterTab('all')}
-                    className={`rounded px-2 py-1 transition-all ${
-                      filterTab === 'all' ? 'bg-white text-[#237b68] shadow-2xs' : 'text-[#717b72]'
+                    className={`rounded-lg px-2.5 py-1 transition-all ${
+                      filterTab === 'all'
+                        ? 'bg-[#237b68] text-white shadow-2xs'
+                        : 'bg-[#f0f4ee] text-[#59645c] hover:bg-[#e4ece2]'
                     }`}
                   >
-                    All ({rwaTokens.length})
+                    All ({availableTokens.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFilterTab('rwa')}
+                    className={`rounded-lg px-2.5 py-1 transition-all ${
+                      filterTab === 'rwa'
+                        ? 'bg-[#237b68] text-white shadow-2xs'
+                        : 'bg-[#f0f4ee] text-[#59645c] hover:bg-[#e4ece2]'
+                    }`}
+                  >
+                    RWA Stocks ({rwaCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFilterTab('crypto')}
+                    className={`rounded-lg px-2.5 py-1 transition-all ${
+                      filterTab === 'crypto'
+                        ? 'bg-[#237b68] text-white shadow-2xs'
+                        : 'bg-[#f0f4ee] text-[#59645c] hover:bg-[#e4ece2]'
+                    }`}
+                  >
+                    Crypto ({cryptoCount})
                   </button>
                   <button
                     type="button"
                     onClick={() => setFilterTab('selected')}
-                    className={`rounded px-2 py-1 transition-all ${
-                      filterTab === 'selected' ? 'bg-white text-[#237b68] shadow-2xs' : 'text-[#717b72]'
+                    className={`rounded-lg px-2.5 py-1 transition-all ${
+                      filterTab === 'selected'
+                        ? 'bg-[#237b68] text-white shadow-2xs'
+                        : 'bg-[#f0f4ee] text-[#59645c] hover:bg-[#e4ece2]'
                     }`}
                   >
                     Picked ({selectedMints.length})
                   </button>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => setDropdownOpen(false)}
+                  className="rounded-md p-1 font-mono text-[11px] font-bold text-[#717b72] hover:bg-[#f0f4ee] hover:text-[#2b3a30]"
+                  title="Close popup"
+                >
+                  ✕
+                </button>
               </div>
 
-              {/* Sticky Search bar */}
-              <div className="relative">
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search stock ID (e.g. AAPL, NVDA, TSLA)..."
-                  disabled={busy}
-                  className="w-full rounded-[12px] border border-[#aeb8ad] bg-white px-3 py-2 pl-8 font-mono text-[11px] text-[#2b3a30] shadow-2xs outline-none focus:border-[#237b68] disabled:opacity-50"
-                />
-                <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] text-[#717b72]">
-                  🔍
-                </span>
-                {search && (
-                  <button
-                    type="button"
-                    onClick={() => setSearch('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-[#717b72] hover:text-[#2b3a30]"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-
-              {/* 3-Column Grid limited in size */}
-              <div className="max-h-52 overflow-y-auto rounded-xl border border-[#d8ded6] bg-white p-2">
+              {/* 3-Column Grid inside the popup */}
+              <div className="max-h-56 overflow-y-auto rounded-xl border border-[#e5ebe3] bg-[#fcfdfa] p-2">
                 {filteredTokens.length === 0 ? (
                   <div className="p-4 text-center text-[11px] text-[#717b72]">
                     {filterTab === 'selected'
-                      ? 'No assets selected yet. Switch to "All" to pick stocks.'
-                      : 'No matching stock token found.'}
+                      ? 'No assets selected yet. Switch to "All" to pick assets.'
+                      : 'No matching asset found.'}
                   </div>
                 ) : (
                   <div className="grid grid-cols-3 gap-1.5">
                     {filteredTokens.map((token) => {
                       const isSelected = selectedMints.includes(token.mint);
+                      const isCrypto = token.category === 'crypto';
                       return (
                         <button
                           key={token.mint}
                           type="button"
                           onClick={() => toggleToken(token.mint)}
                           disabled={busy}
-                          title={token.symbol}
+                          title={token.name}
                           className={`flex items-center justify-between rounded-lg px-2.5 py-2 text-left font-mono text-[12px] font-semibold transition-all border ${
                             isSelected
-                              ? 'border-[#237b68] bg-[#edf6f2] text-[#185347] shadow-2xs'
-                              : 'border-[#e5e9e3] bg-white text-[#2b3a30] hover:border-[#237b68]/50 hover:bg-[#fbfcfb]'
+                              ? 'border-[#237b68] bg-[#edf6f2] text-[#185347] shadow-2xs ring-1 ring-[#237b68]/40'
+                              : 'border-[#e2e7df] bg-white text-[#2b3a30] hover:border-[#237b68]/40 hover:bg-[#fbfcfb]'
                           }`}
                         >
-                          <span className="truncate">{token.symbol}</span>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span
+                              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                                isCrypto ? 'bg-[#9945FF]' : 'bg-[#237b68]'
+                              }`}
+                            />
+                            <span className="truncate">{token.symbol}</span>
+                          </div>
                           <span
                             className={`ml-1 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full text-[8px] font-bold ${
                               isSelected
@@ -304,16 +331,16 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
                 )}
               </div>
 
-              {/* Quick action links */}
-              <div className="flex items-center justify-between text-[10px]">
+              {/* Popup Action Footer */}
+              <div className="flex items-center justify-between pt-1 text-[10px]">
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
                     onClick={handleAddAll}
-                    disabled={busy || selectedMints.length === rwaTokens.length}
+                    disabled={busy || selectedMints.length === availableTokens.length}
                     className="text-[#237b68] underline hover:text-[#185347] disabled:opacity-40"
                   >
-                    + Select all ({rwaTokens.length})
+                    + Select all ({availableTokens.length})
                   </button>
                   {selectedMints.length > 0 && (
                     <button
@@ -330,46 +357,52 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
                 <button
                   type="button"
                   onClick={() => setDropdownOpen(false)}
-                  className="rounded-lg bg-[#237b68] px-3 py-1 font-mono text-[10px] font-semibold text-white hover:bg-[#1b6152]"
+                  className="rounded-lg bg-[#237b68] px-3.5 py-1.5 font-mono text-[10px] font-semibold text-white shadow-2xs hover:bg-[#1b6152]"
                 >
-                  Done (Apply)
+                  Done
                 </button>
               </div>
-
-              {/* Picked Tokens summary chips inside drawer */}
-              {selectedMints.length > 0 && (
-                <div className="mt-2 space-y-1.5 border-t border-[#e2e6df] pt-2">
-                  <span className="text-[9px] font-bold uppercase tracking-wider text-[#717b72]">
-                    Active Selection ({selectedMints.length})
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedMints.map((mint) => {
-                      const token = rwaTokens.find((t) => t.mint === mint);
-                      if (!token) return null;
-                      return (
-                        <span
-                          key={token.mint}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#237b68]/30 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-[#253328] shadow-2xs"
-                        >
-                          <span className="h-1.5 w-1.5 rounded-full bg-[#237b68]" />
-                          {token.symbol}
-                          <button
-                            type="button"
-                            onClick={() => toggleToken(token.mint)}
-                            disabled={busy}
-                            className="ml-1 text-[#a14343] hover:text-[#7d2f2f]"
-                            title="Remove"
-                          >
-                            ✕
-                          </button>
-                        </span>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
             </div>
           )}
+
+          {/* Selected Asset Chips displayed directly in the column below search bar */}
+          <div className="mt-1 space-y-1.5">
+            {selectedMints.length === 0 ? (
+              <p className="text-[11px] text-[#717b72]">
+                No assets selected yet. Click the search bar above to browse and pick RWA stocks & crypto.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {selectedMints.map((mint) => {
+                  const token = availableTokens.find((t) => t.mint === mint);
+                  if (!token) return null;
+                  const isCrypto = token.category === 'crypto';
+                  return (
+                    <span
+                      key={token.mint}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-[#237b68]/30 bg-white px-2.5 py-1 font-mono text-[11px] font-semibold text-[#253328] shadow-2xs"
+                    >
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          isCrypto ? 'bg-[#9945FF]' : 'bg-[#237b68]'
+                        }`}
+                      />
+                      {token.symbol}
+                      <button
+                        type="button"
+                        onClick={() => toggleToken(token.mint)}
+                        disabled={busy}
+                        className="ml-1 text-[#a14343] hover:text-[#7d2f2f]"
+                        title="Remove"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         <button
