@@ -19,6 +19,36 @@ const ACTION_LABEL: Partial<Record<CuratorAction, string>> = {
   seeding: 'Sending first deposit…',
 };
 
+const ASSET_PRICES: Record<string, string> = {
+  AAPL: '$255.00',
+  AAPLx: '$255.00',
+  NVDA: '$185.00',
+  NVDAx: '$185.00',
+  TSLA: '$430.00',
+  TSLAx: '$430.00',
+  MSFT: '$420.00',
+  MSFTx: '$420.00',
+  AMZN: '$190.00',
+  AMZNx: '$190.00',
+  GOOGL: '$175.00',
+  GOOGLx: '$175.00',
+  META: '$510.00',
+  METAx: '$510.00',
+  SPY: '$580.00',
+  SPYx: '$580.00',
+  COIN: '$220.00',
+  COINx: '$220.00',
+  SOL: '$180.00',
+  BTC: '$92,000.00',
+  ETH: '$3,400.00',
+};
+
+function getAssetPrice(symbol: string, underlying?: string): string {
+  if (underlying && ASSET_PRICES[underlying]) return ASSET_PRICES[underlying];
+  if (ASSET_PRICES[symbol]) return ASSET_PRICES[symbol];
+  return '$100.00';
+}
+
 export function CreateVaultCard({connected, deploymentReady, action, onCreate, onCreated}: Props) {
   const notify = useNotify();
   const {data: allTokens = []} = useOnChainTokens();
@@ -31,7 +61,6 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
   const [selectedMints, setSelectedMints] = useState<string[]>([]);
   // Sliding dropdown popup state
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [filterTab, setFilterTab] = useState<'all' | 'rwa' | 'crypto' | 'selected'>('all');
   const [search, setSearch] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -45,33 +74,16 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const rwaCount = useMemo(
-    () => availableTokens.filter((t) => t.category !== 'crypto').length,
-    [availableTokens]
-  );
-  const cryptoCount = useMemo(
-    () => availableTokens.filter((t) => t.category === 'crypto').length,
-    [availableTokens]
-  );
-
-  // Filtered tokens based on search input and category tab
+  // Filtered tokens based on search input (filter tabs removed as requested)
   const filteredTokens = useMemo(() => {
-    let list = availableTokens;
-    if (filterTab === 'rwa') {
-      list = list.filter((t) => t.category !== 'crypto');
-    } else if (filterTab === 'crypto') {
-      list = list.filter((t) => t.category === 'crypto');
-    } else if (filterTab === 'selected') {
-      list = list.filter((t) => selectedMints.includes(t.mint));
-    }
     const q = search.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter(
+    if (!q) return availableTokens;
+    return availableTokens.filter(
       (t) =>
         t.symbol.toLowerCase().includes(q) ||
         (t.underlying && t.underlying.toLowerCase().includes(q))
     );
-  }, [availableTokens, filterTab, search, selectedMints]);
+  }, [availableTokens, search]);
 
   function toggleToken(mint: string) {
     setSelectedMints((prev) =>
@@ -194,53 +206,15 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
             {/* Pop-up Sliding Dropdown Panel (Positioned ABOVE the search bar) */}
             {dropdownOpen && (
               <div className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-50 space-y-3 rounded-2xl border border-[#cdd3ca] bg-white p-3.5 shadow-2xl transition-all duration-150 animate-in fade-in slide-in-from-bottom-2">
-                {/* Filter Tabs & Close Button */}
-                <div className="flex items-center justify-between gap-2 border-b border-[#edf1eb] pb-2.5">
-                  <div className="flex items-center gap-1.5 overflow-x-auto text-[10px] font-semibold">
-                    <button
-                      type="button"
-                      onClick={() => setFilterTab('all')}
-                      className={`rounded-lg px-2.5 py-1 transition-all ${
-                        filterTab === 'all'
-                          ? 'bg-[#237b68] text-white shadow-2xs'
-                          : 'bg-[#f0f4ee] text-[#59645c] hover:bg-[#e4ece2]'
-                      }`}
-                    >
-                      All ({availableTokens.length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFilterTab('rwa')}
-                      className={`rounded-lg px-2.5 py-1 transition-all ${
-                        filterTab === 'rwa'
-                          ? 'bg-[#237b68] text-white shadow-2xs'
-                          : 'bg-[#f0f4ee] text-[#59645c] hover:bg-[#e4ece2]'
-                      }`}
-                    >
-                      RWA Stocks ({rwaCount})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFilterTab('crypto')}
-                      className={`rounded-lg px-2.5 py-1 transition-all ${
-                        filterTab === 'crypto'
-                          ? 'bg-[#237b68] text-white shadow-2xs'
-                          : 'bg-[#f0f4ee] text-[#59645c] hover:bg-[#e4ece2]'
-                      }`}
-                    >
-                      Crypto ({cryptoCount})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFilterTab('selected')}
-                      className={`rounded-lg px-2.5 py-1 transition-all ${
-                        filterTab === 'selected'
-                          ? 'bg-[#237b68] text-white shadow-2xs'
-                          : 'bg-[#f0f4ee] text-[#59645c] hover:bg-[#e4ece2]'
-                      }`}
-                    >
-                      Picked ({selectedMints.length})
-                    </button>
+                {/* Pop-up Header: Asset count & Close Button (Filter tabs removed) */}
+                <div className="flex items-center justify-between border-b border-[#edf1eb] pb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-editorial text-[13px] font-semibold text-[#253328]">
+                      Asset Universe
+                    </span>
+                    <span className="rounded-full bg-[#f0f3ee] px-2 py-0.5 font-mono text-[10px] font-semibold text-[#59645c]">
+                      {filteredTokens.length} options
+                    </span>
                   </div>
 
                   <button
@@ -257,15 +231,14 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
                 <div className="max-h-[216px] overflow-y-auto rounded-xl border border-[#e5ebe3] bg-[#fcfdfa] p-1.5">
                   {filteredTokens.length === 0 ? (
                     <div className="p-4 text-center text-[11px] text-[#717b72]">
-                      {filterTab === 'selected'
-                        ? 'No assets selected yet. Switch to "All" to pick assets.'
-                        : 'No matching asset found.'}
+                      No matching asset found.
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-1.5">
                       {filteredTokens.map((token) => {
                         const isSelected = selectedMints.includes(token.mint);
                         const isCrypto = token.category === 'crypto';
+                        const price = getAssetPrice(token.symbol, token.underlying);
                         return (
                           <button
                             key={token.mint}
@@ -287,6 +260,9 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
                               />
                               <span className="font-mono text-[12px] font-bold text-[#2b3a30] truncate">
                                 {token.symbol}
+                              </span>
+                              <span className="font-mono text-[11px] font-semibold text-[#237b68]">
+                                {price}
                               </span>
                               <span className="rounded bg-[#f0f3ee] px-1.5 py-0.5 text-[9px] font-mono text-[#5f6861]">
                                 {isCrypto ? 'Crypto' : 'RWA'}
@@ -383,6 +359,7 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
                   const token = availableTokens.find((t) => t.mint === mint);
                   if (!token) return null;
                   const isCrypto = token.category === 'crypto';
+                  const price = getAssetPrice(token.symbol, token.underlying);
                   return (
                     <span
                       key={token.mint}
@@ -393,7 +370,8 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
                           isCrypto ? 'bg-[#9945FF]' : 'bg-[#237b68]'
                         }`}
                       />
-                      {token.symbol}
+                      <span>{token.symbol}</span>
+                      <span className="text-[10px] text-[#237b68] font-semibold">{price}</span>
                       <button
                         type="button"
                         onClick={() => toggleToken(token.mint)}
