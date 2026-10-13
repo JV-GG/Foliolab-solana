@@ -104,17 +104,10 @@ export function useOnChainTokens() {
           }
         }
 
-        // Add supported crypto assets
-        for (const crypto of POPULAR_CRYPTO_TOKENS) {
-          if (!results.some((r) => r.mint === crypto.mint)) {
-            results.push(crypto);
-          }
-        }
-
         return results;
       } catch (err) {
         console.warn('Failed to fetch on-chain tokens from registry, fallback to config:', err);
-        return [...deployment().tokens, ...POPULAR_CRYPTO_TOKENS];
+        return deployment().tokens;
       }
     },
     staleTime: 60_000,
