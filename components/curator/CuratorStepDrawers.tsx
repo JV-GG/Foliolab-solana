@@ -202,8 +202,30 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
 
   const publishing = action === 'publishing';
 
+  function hasAssetBalance(mint: string): boolean {
+    const token = tokens.find((t) => t.mint === mint);
+    return vault.holdings.some(
+      (h) => (h.asset === mint || (token && h.symbol === token.symbol)) && BigInt(h.amount) > BigInt(0)
+    );
+  }
+
+  function handleRemoveAsset(mint: string) {
+    if (!managerAllowed || publishing) return;
+    if (hasAssetBalance(mint)) {
+      const sym = tokens.find((t) => t.mint === mint)?.symbol || 'Asset';
+      notify(`Cannot remove ${sym}: vault holds an active balance. Rebalance or liquidate first.`);
+      return;
+    }
+    toggleToken(mint);
+  }
+
   function toggleToken(mint: string) {
     if (!managerAllowed || publishing) return;
+    if (selectedMints.includes(mint) && hasAssetBalance(mint)) {
+      const sym = tokens.find((t) => t.mint === mint)?.symbol || 'Asset';
+      notify(`Cannot remove ${sym}: vault holds an active balance. Rebalance or liquidate first.`);
+      return;
+    }
     setSelectedMints((prev) => {
       const next = prev.includes(mint) ? prev.filter((m) => m !== mint) : [...prev, mint];
       setWeights((prevWeights) => {
@@ -235,8 +257,21 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
 
   function handleClearAll() {
     if (!managerAllowed || publishing) return;
-    setSelectedMints([]);
-    setWeights({});
+    const lockedMints = selectedMints.filter((m) => hasAssetBalance(m));
+    if (lockedMints.length > 0) {
+      setSelectedMints(lockedMints);
+      setWeights((prev) => {
+        const next: Record<string, number> = {};
+        lockedMints.forEach((m) => {
+          next[m] = prev[m] ?? 0;
+        });
+        return next;
+      });
+      notify(`Cleared unheld assets. ${lockedMints.length} asset(s) with active vault balance were retained.`);
+    } else {
+      setSelectedMints([]);
+      setWeights({});
+    }
   }
 
   const [text, setText] = useState(vault.plan?.text ?? '');
@@ -850,13 +885,18 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                             const isSelected = selectedMints.includes(token.mint);
                             const isCrypto = token.category === 'crypto';
                             const price = getAssetPrice(token.symbol, token.underlying);
+                            const hasBalance = hasAssetBalance(token.mint);
                             return (
                               <button
                                 key={token.mint}
                                 type="button"
                                 onClick={() => toggleToken(token.mint)}
                                 disabled={!managerAllowed || publishing}
-                                title={token.name}
+                                title={
+                                  hasBalance && isSelected
+                                    ? `${token.name} (Held in vault: cannot be removed)`
+                                    : token.name
+                                }
                                 className={`flex h-9 w-full items-center justify-between rounded-lg px-3 text-left transition-all border ${
                                   isSelected
                                     ? 'border-[#237b68] bg-[#edf6f2] text-[#185347] shadow-2xs ring-1 ring-[#237b68]/40'
@@ -878,6 +918,14 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                                   <span className="w-14 shrink-0 text-center rounded bg-[#f0f3ee] px-1.5 py-0.5 text-[9px] font-mono font-medium text-[#5f6861]">
                                     {isCrypto ? 'Crypto' : 'RWA'}
                                   </span>
+                                  {hasBalance && (
+                                    <span
+                                      className="rounded bg-[#e8f2fc] px-1.5 py-0.5 text-[9px] font-mono font-semibold text-[#1d5c96]"
+                                      title="Vault holds active balance"
+                                    >
+                                      Held
+                                    </span>
+                                  )}
                                 </div>
                                 <span
                                   className={`ml-2 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold ${
@@ -957,48 +1005,6 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                   </span>
                 </button>
               </div>
-
-              {/* Selected Asset Chips */}
-              <div className="mt-1 space-y-1.5">
-                {selectedMints.length === 0 ? (
-                  <p className="text-[11px] text-[#717b72]">
-                    No assets selected yet. Click the search bar above to browse and pick RWA stocks & crypto.
-                  </p>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedMints.map((mint) => {
-                      const token = availableTokens.find((t) => t.mint === mint);
-                      if (!token) return null;
-                      const isCrypto = token.category === 'crypto';
-                      const price = getAssetPrice(token.symbol, token.underlying);
-                      return (
-                        <span
-                          key={token.mint}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#237b68]/30 bg-white px-2.5 py-1 font-mono text-[11px] font-semibold text-[#253328] shadow-2xs"
-                        >
-                          <span
-                            className={`h-1.5 w-1.5 rounded-full ${
-                              isCrypto ? 'bg-[#9945FF]' : 'bg-[#237b68]'
-                            }`}
-                          />
-                          <span>{token.symbol}</span>
-                          <span className="text-[10px] text-[#237b68] font-semibold">{price}</span>
-                          {managerAllowed && !publishing && (
-                            <button
-                              type="button"
-                              onClick={() => toggleToken(token.mint)}
-                              className="ml-1 text-[#a14343] hover:text-[#7d2f2f]"
-                              title={`Remove ${token.symbol}`}
-                            >
-                              ✕
-                            </button>
-                          )}
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
             </div>
 
             <div className="pt-2 border-t border-[#edf1eb]">
@@ -1007,12 +1013,12 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                   Target Asset Weights
                 </label>
                 <span className="font-mono text-[11px] font-bold text-[#237b68]">
-                  Total: 100% ✓ · USDC Cash: {usdcPercent}%
+                  Total: 100% ✓
                 </span>
               </div>
 
               <div className="flex items-center justify-between text-[10px] text-[#717b72]">
-                <span>Adjust stock allocations; remaining percentage stays in USDC cash automatically.</span>
+                <span>Configure portfolio allocations for your index strategy.</span>
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
@@ -1097,40 +1103,71 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                   const maxAllowed = Math.max(0, 100 - otherSum);
                   const isCrypto = token.category === 'crypto';
                   const price = getAssetPrice(token.symbol, token.underlying);
+                  const hasBalance = hasAssetBalance(token.mint);
 
                   return (
                     <div key={token.mint} className="rounded-lg border border-[#e2e6df] bg-white p-2.5 shadow-sm">
                       <div className="flex items-center justify-between text-[11px]">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
                           <span
                             className={`h-2 w-2 shrink-0 rounded-full ${
                               isCrypto ? 'bg-[#9945FF]' : 'bg-[#237b68]'
                             }`}
                           />
-                          <strong className="w-14 shrink-0 text-[#253328] font-mono font-bold">{token.symbol}</strong>
-                          <span className="w-18 shrink-0 font-mono text-[10px] font-semibold text-[#237b68]">
+                          <strong className="font-mono text-[12px] font-bold text-[#253328]">{token.symbol}</strong>
+                          <span className="rounded bg-[#edf6f2] px-2 py-0.5 font-mono text-[11px] font-bold text-[#237b68] shadow-2xs">
                             {price}
                           </span>
-                          <span className="rounded bg-[#f0f3ee] px-1.5 py-0.2 font-mono text-[9px] text-[#5f6861]">
+                          <span className="rounded bg-[#f0f3ee] px-1.5 py-0.5 font-mono text-[9px] text-[#5f6861]">
                             {isCrypto ? 'Crypto' : 'RWA'}
                           </span>
+                          {hasBalance && (
+                            <span
+                              className="rounded bg-[#e8f2fc] px-1.5 py-0.5 font-mono text-[9px] font-semibold text-[#1d5c96]"
+                              title="Vault holds active balance of this token"
+                            >
+                              Held
+                            </span>
+                          )}
                         </div>
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            step="1"
-                            value={currentPct}
-                            disabled={!managerAllowed || publishing}
-                            onChange={(e) => {
-                              const raw = Number(e.target.value) || 0;
-                              const clamped = Math.min(maxAllowed, Math.max(0, raw));
-                              setWeights((prev) => ({...prev, [token.mint]: clamped}));
-                            }}
-                            className="h-6 w-14 rounded border border-[#cdd3ca] px-1 text-right font-mono text-[11px] font-bold"
-                          />
-                          <span className="font-mono text-[10px] font-semibold text-[#717b72]">%</span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="1"
+                              value={currentPct}
+                              disabled={!managerAllowed || publishing}
+                              onChange={(e) => {
+                                const raw = Number(e.target.value) || 0;
+                                const clamped = Math.min(maxAllowed, Math.max(0, raw));
+                                setWeights((prev) => ({...prev, [token.mint]: clamped}));
+                              }}
+                              className="h-6 w-14 rounded border border-[#cdd3ca] px-1 text-right font-mono text-[11px] font-bold"
+                            />
+                            <span className="font-mono text-[10px] font-semibold text-[#717b72]">%</span>
+                          </div>
+
+                          {managerAllowed && !publishing && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveAsset(token.mint)}
+                              disabled={hasBalance}
+                              title={
+                                hasBalance
+                                  ? 'Cannot remove: vault holds active balance of this asset'
+                                  : `Remove ${token.symbol} from vault`
+                              }
+                              className={`flex h-6 w-6 items-center justify-center rounded border transition-colors ${
+                                hasBalance
+                                  ? 'cursor-not-allowed border-transparent text-[#b0b8af] opacity-40'
+                                  : 'border-[#f2d8d8] bg-[#fdf5f5] text-[#b83838] hover:border-[#b83838] hover:bg-[#ffebeb]'
+                              }`}
+                            >
+                              ✕
+                            </button>
+                          )}
                         </div>
                       </div>
                       <input
