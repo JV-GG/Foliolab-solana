@@ -88,57 +88,65 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
     }
   }, [onChainTokens]);
 
-  // Target weights initialization: honor on-chain targets or curator-selected assets
-  const initialWeights = useMemo(() => {
-    const map: Record<string, number> = {};
-    if (vault.targets && vault.targets.length > 0) {
-      for (const t of vault.targets) {
-        map[t.asset] = t.targetPercent;
-      }
-      return map;
+  // Resolve which RWA tokens were picked when creating the vault
+  const pickedRwaMints = useMemo(() => {
+    // 1. From server vault data
+    if (vault.pickedMints && vault.pickedMints.length > 0) {
+      return vault.pickedMints;
     }
-
-    if (tokens.length === 0) return map;
-
-    // Check if curator pre-selected specific assets when creating vault
-    let selectedMints: string[] | null = null;
+    // 2. From on-chain targets if already set
+    if (vault.targets && vault.targets.length > 0) {
+      const nonUsdc = vault.targets.filter((t) => t.symbol !== 'USDC').map((t) => t.asset);
+      if (nonUsdc.length > 0) return nonUsdc;
+    }
+    // 3. From client localStorage
     if (typeof window !== 'undefined') {
       try {
         const stored = localStorage.getItem(`folio_vault_selected_assets_${vault.address}`);
-        if (stored) selectedMints = JSON.parse(stored);
-      } catch {
-        // ignore
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+    }
+    // 4. Default: all on-chain RWA tokens (excluding USDC)
+    return tokens.filter((t) => t.symbol !== 'USDC').map((t) => t.mint);
+  }, [vault.pickedMints, vault.targets, vault.address, tokens]);
+
+  // Step 3 should ONLY show the RWA tokens picked when creating the vault
+  const step3Tokens = useMemo(() => {
+    const pickedSet = new Set(pickedRwaMints);
+    return tokens.filter((t) => pickedSet.has(t.mint));
+  }, [tokens, pickedRwaMints]);
+
+  // Target weights initialization: honor on-chain targets or distribute 100% across picked RWA tokens
+  const initialWeights = useMemo(() => {
+    const map: Record<string, number> = {};
+    if (vault.targets && vault.targets.length > 0) {
+      let matchCount = 0;
+      for (const t of vault.targets) {
+        if (step3Tokens.some((st) => st.mint === t.asset)) {
+          map[t.asset] = t.targetPercent;
+          matchCount++;
+        }
       }
+      if (matchCount > 0) return map;
     }
 
-    const usdc = tokens.find((t) => t.symbol === 'USDC');
-    const rwaTokens = tokens.filter((t) => t.symbol !== 'USDC');
-    const activeRwas = selectedMints
-      ? rwaTokens.filter((t) => selectedMints!.includes(t.mint))
-      : rwaTokens;
+    if (step3Tokens.length === 0) return map;
 
-    if (activeRwas.length === 0) {
-      if (usdc) map[usdc.mint] = 100;
-      return map;
-    }
-
-    // Allocate 20% to cash USDC and split remaining 80% among active stock RWAs
-    const baseUsdcPct = 20;
-    if (usdc) map[usdc.mint] = baseUsdcPct;
-
-    const remaining = 100 - (usdc ? baseUsdcPct : 0);
-    const perRwa = Math.floor(remaining / activeRwas.length);
+    // Distribute 100% equally among the picked RWA tokens
+    const perToken = Math.floor(100 / step3Tokens.length);
     let distributed = 0;
-
-    activeRwas.forEach((rwa, idx) => {
-      const isLast = idx === activeRwas.length - 1;
-      const weight = isLast ? remaining - distributed : perRwa;
+    step3Tokens.forEach((rwa, idx) => {
+      const isLast = idx === step3Tokens.length - 1;
+      const weight = isLast ? 100 - distributed : perToken;
       map[rwa.mint] = weight;
       distributed += weight;
     });
 
     return map;
-  }, [vault.targets, vault.address, tokens]);
+  }, [vault.targets, step3Tokens]);
 
   const [text, setText] = useState(vault.plan?.text ?? '');
   const [weights, setWeights] = useState<Record<string, number>>(initialWeights);
@@ -660,77 +668,83 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                 type="button"
                 disabled={!managerAllowed || publishing}
                 onClick={() => {
-                  if (tokens.length === 0) return;
-                  const perToken = Math.floor(100 / tokens.length);
-                  const rem = 100 - (perToken * tokens.length);
+                  if (step3Tokens.length === 0) return;
+                  const perToken = Math.floor(100 / step3Tokens.length);
+                  const rem = 100 - (perToken * step3Tokens.length);
                   const next: Record<string, number> = {};
-                  tokens.forEach((t, i) => {
+                  step3Tokens.forEach((t, i) => {
                     next[t.mint] = perToken + (i === 0 ? rem : 0);
                   });
                   setWeights(next);
                 }}
                 className="font-medium text-[#237b68] hover:underline"
               >
-                Equally balance all ({tokens.length})
+                Equally balance all ({step3Tokens.length})
               </button>
             </div>
 
             {/* Target Weight Sliders */}
             <div className="space-y-2.5">
-              {tokens.map((token) => {
-                const currentPct = weights[token.mint] ?? 0;
-                const otherSum = tokens.reduce((sum, t) => {
-                  if (t.mint === token.mint) return sum;
-                  return sum + (Number(weights[t.mint]) || 0);
-                }, 0);
-                const maxAllowed = Math.max(0, 100 - otherSum);
+              {step3Tokens.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-[#cdd3ca] p-3 text-center text-[11px] text-[#717b72]">
+                  No RWA tokens were picked for this vault.
+                </div>
+              ) : (
+                step3Tokens.map((token) => {
+                  const currentPct = weights[token.mint] ?? 0;
+                  const otherSum = step3Tokens.reduce((sum, t) => {
+                    if (t.mint === token.mint) return sum;
+                    return sum + (Number(weights[t.mint]) || 0);
+                  }, 0);
+                  const maxAllowed = Math.max(0, 100 - otherSum);
 
-                return (
-                  <div key={token.mint} className="rounded-lg border border-[#e2e6df] bg-white p-2.5 shadow-sm">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <div>
-                        <strong className="text-[#253328]">{token.symbol}</strong>
-                        <span className="ml-1 text-[10px] text-[#717b72]">({token.name})</span>
+                  return (
+                    <div key={token.mint} className="rounded-lg border border-[#e2e6df] bg-white p-2.5 shadow-sm">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <div>
+                          <strong className="text-[#253328]">{token.symbol}</strong>
+                          <span className="ml-1 text-[10px] text-[#717b72]">({token.name})</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="1"
+                            value={currentPct}
+                            disabled={!managerAllowed || publishing}
+                            onChange={(e) => {
+                              const raw = Number(e.target.value) || 0;
+                              const clamped = Math.min(maxAllowed, Math.max(0, raw));
+                              setWeights((prev) => ({...prev, [token.mint]: clamped}));
+                            }}
+                            className="h-6 w-14 rounded border border-[#cdd3ca] px-1 text-right font-mono text-[11px] font-bold"
+                          />
+                          <span className="font-mono text-[10px] font-semibold text-[#717b72]">%</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          step="1"
-                          value={currentPct}
-                          disabled={!managerAllowed || publishing}
-                          onChange={(e) => {
-                            const raw = Number(e.target.value) || 0;
-                            const clamped = Math.min(maxAllowed, Math.max(0, raw));
-                            setWeights((prev) => ({...prev, [token.mint]: clamped}));
-                          }}
-                          className="h-6 w-14 rounded border border-[#cdd3ca] px-1 text-right font-mono text-[11px] font-bold"
-                        />
-                        <span className="font-mono text-[10px] font-semibold text-[#717b72]">%</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={Math.min(currentPct, maxAllowed)}
+                        disabled={!managerAllowed || publishing}
+                        onChange={(e) => {
+                          const raw = Number(e.target.value) || 0;
+                          const clamped = Math.min(maxAllowed, Math.max(0, raw));
+                          setWeights((prev) => ({...prev, [token.mint]: clamped}));
+                        }}
+                        className="mt-2 h-1 w-full accent-[#237b68]"
+                      />
+                      <div className="mt-1 flex items-center justify-between text-[9px] text-[#849087]">
+                        <span>0%</span>
+                        <span>100%</span>
                       </div>
                     </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      step="1"
-                      value={Math.min(currentPct, maxAllowed)}
-                      disabled={!managerAllowed || publishing}
-                      onChange={(e) => {
-                        const raw = Number(e.target.value) || 0;
-                        const clamped = Math.min(maxAllowed, Math.max(0, raw));
-                        setWeights((prev) => ({...prev, [token.mint]: clamped}));
-                      }}
-                      className="mt-2 h-1 w-full accent-[#237b68]"
-                    />
-                    <div className="mt-1 flex items-center justify-between text-[9px] text-[#849087]">
-                      <span>0%</span>
-                      <span>100%</span>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
 
             {/* Investment thesis memo */}

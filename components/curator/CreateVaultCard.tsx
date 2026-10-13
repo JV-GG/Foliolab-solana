@@ -29,18 +29,42 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
   // Filter on-chain allowlisted RWA tokens (excluding USDC settlement currency)
   const rwaTokens = useMemo(() => allTokens.filter((t) => t.symbol !== 'USDC'), [allTokens]);
   const [selectedMints, setSelectedMints] = useState<string[]>([]);
+  const [dropboxMint, setDropboxMint] = useState<string>('');
 
-  // Default selection: all on-chain RWA tokens
+  // Tokens available in the dropdown (not yet added to fund plan)
+  const availableOptions = useMemo(() => {
+    return rwaTokens.filter((t) => !selectedMints.includes(t.mint));
+  }, [rwaTokens, selectedMints]);
+
+  // Keep dropdown defaulted to the first available option
   useEffect(() => {
-    if (rwaTokens.length > 0 && selectedMints.length === 0) {
-      setSelectedMints(rwaTokens.map((t) => t.mint));
+    if (availableOptions.length > 0 && (!dropboxMint || !availableOptions.some((o) => o.mint === dropboxMint))) {
+      setDropboxMint(availableOptions[0].mint);
+    } else if (availableOptions.length === 0) {
+      setDropboxMint('');
     }
-  }, [rwaTokens, selectedMints.length]);
+  }, [availableOptions, dropboxMint]);
 
-  function toggleMint(mint: string) {
-    setSelectedMints((prev) =>
-      prev.includes(mint) ? prev.filter((m) => m !== mint) : [...prev, mint],
-    );
+  function handleAddTokenFromDropbox() {
+    if (!dropboxMint) return;
+    if (!selectedMints.includes(dropboxMint)) {
+      setSelectedMints((prev) => [...prev, dropboxMint]);
+      const token = rwaTokens.find((t) => t.mint === dropboxMint);
+      notify(`Added ${token?.symbol ?? 'token'} to fund plan.`);
+    }
+  }
+
+  function handleRemoveToken(mint: string) {
+    setSelectedMints((prev) => prev.filter((m) => m !== mint));
+  }
+
+  function handleAddAll() {
+    setSelectedMints(rwaTokens.map((t) => t.mint));
+    notify('Added all available RWA stock tokens to fund plan.');
+  }
+
+  function handleClearAll() {
+    setSelectedMints([]);
   }
 
   const busy = action === 'creating' || action === 'approving' || action === 'seeding';
@@ -52,13 +76,24 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
     if (cleanName.length < 2) return notify('Give the vault a name of at least two characters.');
     if (!/^[A-Z0-9]{2,8}$/.test(cleanSymbol)) return notify('Use a 2–8 character symbol made from letters and numbers.');
     if (!/^\d+(\.\d+)?$/.test(seed) || Number(seed) < 10) return notify('The first deposit must be at least 10 USDC.');
-    if (selectedMints.length === 0) return notify('Select at least one RWA stock token for your vault portfolio.');
+    if (selectedMints.length === 0) return notify('Please pick at least one RWA stock token from the dropdown for your fund plan.');
 
     try {
       const vault = await onCreate(cleanName, cleanSymbol, seed);
       if (typeof window !== 'undefined') {
         localStorage.setItem(`folio_vault_selected_assets_${vault}`, JSON.stringify(selectedMints));
       }
+      // Also persist to server endpoint
+      try {
+        await fetch(`/api/vaults/${vault}/tokens`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({tokens: selectedMints}),
+        });
+      } catch (err) {
+        console.warn('Failed to persist picked tokens to server:', err);
+      }
+
       setName('');
       setSymbol('');
       setSeed('10');
@@ -121,59 +156,139 @@ export function CreateVaultCard({connected, deploymentReady, action, onCreate, o
             Minimum 10 USDC seed. You receive the initial 100% share of the vault.
           </span>
         </label>
-        {/* On-chain RWA Asset Selection */}
-        <div className="space-y-2">
+
+        {/* On-chain RWA Asset Selection via Dropbox */}
+        <div className="space-y-3 rounded-2xl border border-[#cdd3ca] bg-[#f8faf6] p-4">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#59645c]">
-              Portfolio RWA Tokens (On-Chain)
-            </span>
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#59645c]">
+                Fund Plan Asset Universe
+              </span>
+              <h4 className="font-editorial text-[14px] font-semibold text-[#253328]">
+                Pick RWA Tokens (Stock Basket)
+              </h4>
+            </div>
             <span className="font-mono text-[10px] font-semibold text-[#237b68]">
-              {selectedMints.length} of {rwaTokens.length} selected
+              {selectedMints.length} of {rwaTokens.length} picked
             </span>
           </div>
+
           <p className="text-[11px] leading-relaxed text-[#6b746c]">
-            Select which allowlisted stock tokens will form the investment universe for this vault.
+            Use the dropdown to pick which tokenized stocks are allowed in this fund plan.
           </p>
 
-          <div className="grid gap-2">
-            {rwaTokens.map((token) => {
-              const isSelected = selectedMints.includes(token.mint);
-              return (
-                <div
-                  key={token.mint}
-                  onClick={() => !busy && toggleMint(token.mint)}
-                  className={`flex cursor-pointer items-center justify-between rounded-xl border p-2.5 transition select-none ${
-                    isSelected
-                      ? 'border-[#237b68] bg-[#f0f7f4] shadow-xs'
-                      : 'border-[#dde2dc] bg-white opacity-60 hover:opacity-100'
-                  }`}
+          {/* Dropbox / Select input */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <select
+                value={dropboxMint}
+                onChange={(e) => setDropboxMint(e.target.value)}
+                disabled={busy || availableOptions.length === 0}
+                className="w-full appearance-none rounded-[14px] border border-[#aeb8ad] bg-white px-3.5 py-2.5 pr-8 font-mono text-[12px] font-semibold text-[#2b3a30] shadow-xs outline-none focus:border-[#237b68] disabled:opacity-50"
+              >
+                {availableOptions.length === 0 ? (
+                  <option value="">All available RWA tokens already added</option>
+                ) : (
+                  <>
+                    <option value="" disabled>-- Select an RWA stock token --</option>
+                    {availableOptions.map((token) => (
+                      <option key={token.mint} value={token.mint}>
+                        {token.symbol} · {token.name} ({token.underlying || 'Stock'})
+                      </option>
+                    ))}
+                  </>
+                )}
+              </select>
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#717b72]">
+                ▼
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAddTokenFromDropbox}
+              disabled={busy || !dropboxMint || availableOptions.length === 0}
+              className="folio-button-primary shrink-0 py-2.5 px-3.5 text-[11px] disabled:opacity-50"
+            >
+              + Add to Plan
+            </button>
+          </div>
+
+          {/* Quick action buttons */}
+          {rwaTokens.length > 1 && (
+            <div className="flex items-center justify-between text-[10px]">
+              <button
+                type="button"
+                onClick={handleAddAll}
+                disabled={busy || selectedMints.length === rwaTokens.length}
+                className="text-[#237b68] underline hover:text-[#185347] disabled:opacity-40"
+              >
+                + Add all available tokens
+              </button>
+              {selectedMints.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearAll}
+                  disabled={busy}
+                  className="text-[#a14343] hover:underline"
                 >
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      disabled={busy}
-                      onChange={() => toggleMint(token.mint)}
-                      className="h-4 w-4 rounded accent-[#237b68]"
-                    />
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <strong className="font-mono text-xs text-[#2b3a30]">{token.symbol}</strong>
-                        {token.underlying && (
-                          <span className="rounded bg-[#e8ece7] px-1 py-0.2 font-mono text-[9px] text-[#59645c]">
-                            {token.underlying}
-                          </span>
-                        )}
+                  Clear selection
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Picked Tokens in Fund Plan */}
+          <div className="mt-2 space-y-1.5">
+            <span className="text-[9px] font-bold uppercase tracking-wider text-[#717b72]">
+              Picked Tokens in Fund Plan ({selectedMints.length})
+            </span>
+
+            {selectedMints.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-[#b8c0b7] p-3 text-center text-[11px] text-[#717b72]">
+                No RWA tokens picked yet. Select a token from the dropdown above and click &quot;+ Add to Plan&quot;.
+              </div>
+            ) : (
+              <div className="grid gap-1.5">
+                {selectedMints.map((mint) => {
+                  const token = rwaTokens.find((t) => t.mint === mint);
+                  if (!token) return null;
+                  return (
+                    <div
+                      key={token.mint}
+                      className="flex items-center justify-between rounded-xl border border-[#237b68]/30 bg-white p-2.5 shadow-2xs"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#dfede8] font-mono text-[10px] font-bold text-[#237b68]">
+                          ✓
+                        </span>
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <strong className="font-mono text-xs text-[#2b3a30]">{token.symbol}</strong>
+                            {token.underlying && (
+                              <span className="rounded bg-[#e8ece7] px-1 py-0.2 font-mono text-[9px] text-[#59645c]">
+                                {token.underlying}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-[#717b72]">{token.name}</div>
+                        </div>
                       </div>
-                      <div className="text-[11px] text-[#717b72]">{token.name}</div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveToken(token.mint)}
+                        disabled={busy}
+                        className="rounded-lg border border-[#e2e6df] px-2 py-1 font-mono text-[10px] text-[#a14343] hover:border-[#a14343] hover:bg-[#fbf2f2]"
+                        title="Remove from fund plan"
+                      >
+                        ✕ Remove
+                      </button>
                     </div>
-                  </div>
-                  <span className="font-mono text-[10px] text-[#6b746c]">
-                    {isSelected ? '✓ Included' : 'Excluded'}
-                  </span>
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 

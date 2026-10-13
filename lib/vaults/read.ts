@@ -21,7 +21,7 @@ import {
   REBALANCE_INTERVAL_SECONDS,
 } from '@/lib/solana/program';
 import {tokenByMint} from '@/lib/solana/config';
-import {isProposalClosed, getAdoptedStrategy, isVaultClosed} from '@/lib/vaults/proposals';
+import {isProposalClosed, getAdoptedStrategy, isVaultClosed, getPickedTokens} from '@/lib/vaults/proposals';
 
 export const VAULT_STATES = ['DRAFT', 'SEEDED', 'ACTIVE', 'PAUSED', 'CLOSED'] as const;
 /** Shares use the settlement token's decimals (USDC: 6). */
@@ -94,6 +94,7 @@ export interface VaultView {
   openProposal: ProposalView | null;
   cycleStart: number;
   rebalanceIntervalSeconds: number;
+  pickedMints?: string[] | null;
 }
 
 /** Free text, never enforced by the program; every `set_strategy` bumps the version. */
@@ -294,6 +295,7 @@ export async function readVault(vaultParam: string, account?: PublicKey, prices?
     openProposal,
     cycleStart: v.cycleStart ? v.cycleStart.toNumber() : 0,
     rebalanceIntervalSeconds: REBALANCE_INTERVAL_SECONDS,
+    pickedMints: getPickedTokens(address.toBase58()),
   };
 }
 

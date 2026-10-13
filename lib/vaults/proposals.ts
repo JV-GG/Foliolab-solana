@@ -152,3 +152,33 @@ export function isVaultClosed(vault: string): boolean {
   return Boolean(disk[v]);
 }
 
+const PICKED_TOKENS_FILE = path.join(process.cwd(), '.picked-tokens.json');
+
+function readPersistedPickedTokens(): Record<string, string[]> {
+  try {
+    if (fs.existsSync(PICKED_TOKENS_FILE)) {
+      return JSON.parse(fs.readFileSync(PICKED_TOKENS_FILE, 'utf-8'));
+    }
+  } catch {}
+  return {};
+}
+
+function writePersistedPickedTokens(data: Record<string, string[]>): void {
+  try {
+    fs.writeFileSync(PICKED_TOKENS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  } catch {}
+}
+
+export function savePickedTokens(vault: string, mints: string[]): void {
+  const v = vault.toLowerCase();
+  const disk = readPersistedPickedTokens();
+  disk[v] = mints;
+  writePersistedPickedTokens(disk);
+}
+
+export function getPickedTokens(vault: string): string[] | null {
+  const v = vault.toLowerCase();
+  const disk = readPersistedPickedTokens();
+  return disk[v] ?? null;
+}
+

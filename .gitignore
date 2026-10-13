@@ -46,4 +46,5 @@ next-env.d.ts
 # local runtime state
 .closed-vaults.json
 .proposals.json
+.picked-tokens.json
 
