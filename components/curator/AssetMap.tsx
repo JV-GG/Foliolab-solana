@@ -98,9 +98,17 @@ export function AssetMap({
   const drag = useRef<DragState | null>(null);
   const compact = useSyncExternalStore(subscribeViewport, compactViewport, desktopServerSnapshot);
   const singleIsland = artSample || demo;
-  const visibleVaults = singleIsland
-    ? vaults.filter((vault) => vault.address === selectedAddress).slice(0, 1)
-    : vaults;
+  // Sort vaults by value descending so the biggest island is placed in the center (index 0) and smaller islands are placed in outer rings
+  const visibleVaults = useMemo(() => {
+    if (singleIsland) {
+      return vaults.filter((vault) => vault.address === selectedAddress).slice(0, 1);
+    }
+    return [...vaults].sort((a, b) => {
+      const valDiff = vaultValue(b) - vaultValue(a);
+      if (valDiff !== 0) return valDiff;
+      return a.address.localeCompare(b.address);
+    });
+  }, [vaults, singleIsland, selectedAddress]);
   const maxVaultValue = Math.max(0, ...visibleVaults.map(vaultValue));
 
   // 360-degree radial archipelago layout: index 0 at center, new islands expand 360° outward
