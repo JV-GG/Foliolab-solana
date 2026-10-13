@@ -841,29 +841,18 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
           <div className="space-y-4 border-t border-[#e2e6df] p-4 text-xs">
             {/* Frozen Strategy Status Banner vs Proposal Mode Banner */}
             {!isProposing ? (
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-[#cdd3ca] bg-[#f4f7f2] p-3 text-[11px]">
-                <div className="flex items-center gap-2.5">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white border border-[#cdd3ca] text-sm shadow-2xs">
-                    🔒
-                  </span>
-                  <div>
-                    <div className="font-bold text-[#2b3a30]">
-                      Strategy Frozen · Active On-Chain Portfolio
-                    </div>
-                    <div className="text-[10px] text-[#6b746c]">
-                      Asset weights and strategy plan are locked. Click button to start a new proposal.
-                    </div>
+              <div className="flex items-center gap-2.5 rounded-xl border border-[#cdd3ca] bg-[#f4f7f2] p-3 text-[11px]">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white border border-[#cdd3ca] text-sm shadow-2xs">
+                  🔒
+                </span>
+                <div>
+                  <div className="font-bold text-[#2b3a30]">
+                    Strategy Frozen · Active On-Chain Portfolio
+                  </div>
+                  <div className="text-[10px] text-[#6b746c]">
+                    Asset weights and strategy plan are locked. Click button below to start a new proposal.
                   </div>
                 </div>
-                {managerAllowed && !activeProposal && (
-                  <button
-                    type="button"
-                    onClick={() => setIsProposing(true)}
-                    className="folio-button-primary shrink-0 py-1.5 px-3.5 text-[11px] font-bold"
-                  >
-                    Start New Proposal →
-                  </button>
-                )}
               </div>
             ) : (
               <div className="flex items-center justify-between rounded-xl border border-[#237b68]/40 bg-[#edf6f2] p-2.5 text-[11px]">
@@ -898,7 +887,7 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
               <div ref={dropdownRef} className="relative grid gap-2">
                 <div className="flex items-center justify-between">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-[#6b746c]">
-                    Fund Asset Universe (RWA & Crypto)
+                    Fund Asset Universe
                   </label>
                   <span className="font-mono text-[10px] font-semibold text-[#237b68]">
                     {selectedMints.length} of {availableTokens.length} picked
@@ -967,9 +956,6 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                                     </span>
                                     <span className="w-20 shrink-0 font-mono text-[11px] font-semibold text-[#237b68]">
                                       {price}
-                                    </span>
-                                    <span className="w-14 shrink-0 text-center rounded bg-[#f0f3ee] px-1.5 py-0.5 text-[9px] font-mono font-medium text-[#5f6861]">
-                                      {isCrypto ? 'Crypto' : 'RWA'}
                                     </span>
                                   </div>
                                   <span
@@ -1139,7 +1125,7 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
               </div>
               {step3Tokens.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-[#cdd3ca] p-3 text-center text-[11px] text-[#717b72]">
-                  No assets picked for this vault yet. Use the search bar above to pick RWA stock and crypto assets.
+                  No assets picked for this vault yet. Use the search bar above to pick assets.
                 </div>
               ) : (
                 step3Tokens.map((token) => {
@@ -1176,9 +1162,6 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                           <strong className="font-mono text-[12px] font-bold text-[#253328]">{token.symbol}</strong>
                           <span className="rounded bg-[#edf6f2] px-2 py-0.5 font-mono text-[11px] font-bold text-[#237b68] shadow-2xs">
                             {price}
-                          </span>
-                          <span className="rounded bg-[#f0f3ee] px-1.5 py-0.5 font-mono text-[9px] text-[#5f6861]">
-                            {isCrypto ? 'Crypto' : 'RWA'}
                           </span>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
@@ -1379,7 +1362,7 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                           onClick={() => setIsProposing(true)}
                           className="folio-button-primary w-full py-2.5 text-[12px] font-bold"
                         >
-                          + Start New Proposal (Edit Strategy & Weights) →
+                          + Start New Proposal →
                         </button>
                         <button
                           type="button"
