@@ -1,6 +1,6 @@
 'use client';
 
-import {useState, useMemo, useEffect} from 'react';
+import {useState, useMemo, useEffect, useRef} from 'react';
 import {useRouter} from 'next/navigation';
 import {useQueryClient} from '@tanstack/react-query';
 import {PublicKey} from '@solana/web3.js';
@@ -19,6 +19,36 @@ interface Props {
   managerAllowed: boolean;
   onSeed?: () => void;
   onActivate?: () => void;
+}
+
+const ASSET_PRICES: Record<string, string> = {
+  AAPL: '$255.00',
+  AAPLx: '$255.00',
+  NVDA: '$185.00',
+  NVDAx: '$185.00',
+  TSLA: '$430.00',
+  TSLAx: '$430.00',
+  MSFT: '$420.00',
+  MSFTx: '$420.00',
+  AMZN: '$190.00',
+  AMZNx: '$190.00',
+  GOOGL: '$175.00',
+  GOOGLx: '$175.00',
+  META: '$510.00',
+  METAx: '$510.00',
+  SPY: '$580.00',
+  SPYx: '$580.00',
+  COIN: '$220.00',
+  COINx: '$220.00',
+  SOL: '$180.00',
+  BTC: '$92,000.00',
+  ETH: '$3,400.00',
+};
+
+function getAssetPrice(symbol: string, underlying?: string): string {
+  if (underlying && ASSET_PRICES[underlying]) return ASSET_PRICES[underlying];
+  if (ASSET_PRICES[symbol]) return ASSET_PRICES[symbol];
+  return '$100.00';
 }
 
 function dollars(value: string | null) {
@@ -88,8 +118,11 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
     }
   }, [onChainTokens]);
 
-  // Resolve which RWA tokens were picked when creating the vault
-  const pickedRwaMints = useMemo(() => {
+  // Filter on-chain allowlisted RWA and Crypto tokens (excluding USDC settlement currency)
+  const availableTokens = useMemo(() => tokens.filter((t) => t.symbol !== 'USDC'), [tokens]);
+
+  // Resolve which tokens were picked for this vault
+  const initialSelectedMints = useMemo(() => {
     // 1. From server vault data
     if (vault.pickedMints && vault.pickedMints.length > 0) {
       return vault.pickedMints;
@@ -109,41 +142,117 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
         }
       } catch {}
     }
-    // 4. Default: all on-chain RWA tokens (excluding USDC)
-    return tokens.filter((t) => t.symbol !== 'USDC').map((t) => t.mint);
-  }, [vault.pickedMints, vault.targets, vault.address, tokens]);
+    // 4. Default: empty array so curator selects assets in Step 3
+    return [];
+  }, [vault.pickedMints, vault.targets, vault.address]);
 
-  // Step 3 should ONLY show the RWA tokens picked when creating the vault
+  const [selectedMints, setSelectedMints] = useState<string[]>(initialSelectedMints);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setSelectedMints(initialSelectedMints);
+  }, [vault.address, initialSelectedMints]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredTokens = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return availableTokens;
+    return availableTokens.filter(
+      (t) =>
+        t.symbol.toLowerCase().includes(q) ||
+        (t.underlying && t.underlying.toLowerCase().includes(q))
+    );
+  }, [availableTokens, search]);
+
+  // Step 3 dynamically shows the tokens currently selected
   const step3Tokens = useMemo(() => {
-    const pickedSet = new Set(pickedRwaMints);
-    return tokens.filter((t) => pickedSet.has(t.mint));
-  }, [tokens, pickedRwaMints]);
+    const pickedSet = new Set(selectedMints);
+    return availableTokens.filter((t) => pickedSet.has(t.mint));
+  }, [availableTokens, selectedMints]);
 
   const usdcToken = useMemo(() => tokens.find((t) => t.symbol === 'USDC'), [tokens]);
 
-  // Target weights initialization: default 100% USDC (all picked RWA stocks start at 0%), or honor on-chain targets
+  // Target weights initialization: default 100% USDC, or honor on-chain targets
   const initialWeights = useMemo(() => {
     const map: Record<string, number> = {};
     if (vault.targets && vault.targets.length > 0) {
-      let matchCount = 0;
       for (const t of vault.targets) {
-        if (t.symbol !== 'USDC' && step3Tokens.some((st) => st.mint === t.asset)) {
+        if (t.symbol !== 'USDC') {
           map[t.asset] = t.targetPercent;
-          matchCount++;
         }
       }
-      if (matchCount > 0) return map;
+      return map;
     }
-
-    // Default 100% USDC -> all picked RWA stock tokens start at 0%
-    for (const rwa of step3Tokens) {
-      map[rwa.mint] = 0;
+    for (const token of step3Tokens) {
+      map[token.mint] = 0;
     }
     return map;
   }, [vault.targets, step3Tokens]);
 
+  const publishing = action === 'publishing';
+
+  function toggleToken(mint: string) {
+    if (!managerAllowed || publishing) return;
+    setSelectedMints((prev) => {
+      const next = prev.includes(mint) ? prev.filter((m) => m !== mint) : [...prev, mint];
+      setWeights((prevWeights) => {
+        const updated = {...prevWeights};
+        if (prev.includes(mint)) {
+          delete updated[mint];
+        } else {
+          updated[mint] = 0;
+        }
+        return updated;
+      });
+      return next;
+    });
+  }
+
+  function handleAddAll() {
+    if (!managerAllowed || publishing) return;
+    const allMints = availableTokens.map((t) => t.mint);
+    setSelectedMints(allMints);
+    setWeights((prev) => {
+      const next = {...prev};
+      allMints.forEach((m) => {
+        if (next[m] === undefined) next[m] = 0;
+      });
+      return next;
+    });
+    notify(`Added all ${availableTokens.length} assets to fund plan.`);
+  }
+
+  function handleClearAll() {
+    if (!managerAllowed || publishing) return;
+    setSelectedMints([]);
+    setWeights({});
+  }
+
   const [text, setText] = useState(vault.plan?.text ?? '');
   const [weights, setWeights] = useState<Record<string, number>>(initialWeights);
+
+  useEffect(() => {
+    if (vault.targets && vault.targets.length > 0) {
+      const map: Record<string, number> = {};
+      for (const t of vault.targets) {
+        if (t.symbol !== 'USDC') {
+          map[t.asset] = t.targetPercent;
+        }
+      }
+      setWeights(map);
+    }
+  }, [vault.address, vault.targets]);
   const [votingDays, setVotingDays] = useState(3);
   const [error, setError] = useState<string | null>(null);
   const [showProposeModal, setShowProposeModal] = useState(false);
@@ -165,7 +274,6 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
   const usdcPercent = Math.max(0, 100 - rwaTotalPercent);
   const totalPercent = 100;
   const validWeights = rwaTotalPercent <= 100;
-  const publishing = action === 'publishing';
 
   const targetsPayload = useMemo(() => {
     const list: {mint: PublicKey; targetBps: number}[] = [];
@@ -333,6 +441,17 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
     if (!managerAllowed || !validLength || !validWeights || publishing) return;
     setError(null);
     try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(`folio_vault_selected_assets_${vault.address}`, JSON.stringify(selectedMints));
+      }
+      try {
+        await fetch(`/api/vaults/${vault.address}/tokens`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({tokens: selectedMints}),
+        });
+      } catch {}
+
       await setStrategy(vault.address, text, targetsPayload);
       notify(`Strategy & target weights confirmed on-chain.`);
     } catch (caught) {
@@ -346,6 +465,17 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
     if (!managerAllowed || !validLength || !validWeights || publishing) return;
     setError(null);
     try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(`folio_vault_selected_assets_${vault.address}`, JSON.stringify(selectedMints));
+      }
+      try {
+        await fetch(`/api/vaults/${vault.address}/tokens`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({tokens: selectedMints}),
+        });
+      } catch {}
+
       await proposeStrategy(vault.address, text, targetsPayload, votingDays, 50_000_000);
       notify(`Strategy amendment proposal posted on-chain (0.05 SOL bond attached).`);
       setShowProposeModal(false);
@@ -640,7 +770,7 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
       </div>
 
       {/* DRAWER 3: Strategy & Allocation Weights */}
-      <div className="overflow-hidden rounded-xl border border-[#cdd3ca] bg-[#fafbf8] transition-all">
+      <div className={`rounded-xl border border-[#cdd3ca] bg-[#fafbf8] transition-all ${openDrawers.step3 ? 'overflow-visible' : 'overflow-hidden'}`}>
         <button
           type="button"
           onClick={() => toggleDrawer('step3')}
@@ -671,47 +801,249 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
 
         {openDrawers.step3 && (
           <div className="space-y-4 border-t border-[#e2e6df] p-4 text-xs">
-            <div className="flex items-center justify-between">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-[#6b746c]">
-                Target Asset Weights
-              </label>
-              <span className="font-mono text-[11px] font-bold text-[#237b68]">
-                Total: 100% ✓ · USDC Cash: {usdcPercent}%
-              </span>
+            {/* Step 3 Asset Selection: Search Bar with Pop-up Sliding Dropdown */}
+            <div ref={dropdownRef} className="relative grid gap-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-[#6b746c]">
+                  Fund Asset Universe (RWA & Crypto)
+                </label>
+                <span className="font-mono text-[10px] font-semibold text-[#237b68]">
+                  {selectedMints.length} of {availableTokens.length} picked
+                </span>
+              </div>
+
+              {/* Search input container with pop-up sliding dropdown positioned ABOVE */}
+              <div className="relative">
+                {/* Pop-up Sliding Dropdown Panel (Positioned ABOVE the search bar) */}
+                {dropdownOpen && (
+                  <div className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-50 space-y-3 rounded-2xl border border-[#cdd3ca] bg-white p-3.5 shadow-2xl transition-all duration-150 animate-in fade-in slide-in-from-bottom-2">
+                    {/* Pop-up Header: Asset count & Close Button */}
+                    <div className="flex items-center justify-between border-b border-[#edf1eb] pb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-editorial text-[13px] font-semibold text-[#253328]">
+                          Asset Universe
+                        </span>
+                        <span className="rounded-full bg-[#f0f3ee] px-2 py-0.5 font-mono text-[10px] font-semibold text-[#59645c]">
+                          {filteredTokens.length} options
+                        </span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setDropdownOpen(false)}
+                        className="rounded-md p-1 font-mono text-[11px] font-bold text-[#717b72] hover:bg-[#f0f4ee] hover:text-[#2b3a30]"
+                        title="Close popup"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    {/* 1-Column List inside popup: fixed 5 rows height with scroll & NEAT COLUMN ALIGNMENT */}
+                    <div className="max-h-[216px] overflow-y-auto rounded-xl border border-[#e5ebe3] bg-[#fcfdfa] p-1.5">
+                      {filteredTokens.length === 0 ? (
+                        <div className="p-4 text-center text-[11px] text-[#717b72]">
+                          No matching asset found.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 gap-1.5">
+                          {filteredTokens.map((token) => {
+                            const isSelected = selectedMints.includes(token.mint);
+                            const isCrypto = token.category === 'crypto';
+                            const price = getAssetPrice(token.symbol, token.underlying);
+                            return (
+                              <button
+                                key={token.mint}
+                                type="button"
+                                onClick={() => toggleToken(token.mint)}
+                                disabled={!managerAllowed || publishing}
+                                title={token.name}
+                                className={`flex h-9 w-full items-center justify-between rounded-lg px-3 text-left transition-all border ${
+                                  isSelected
+                                    ? 'border-[#237b68] bg-[#edf6f2] text-[#185347] shadow-2xs ring-1 ring-[#237b68]/40'
+                                    : 'border-[#e2e7df] bg-white text-[#2b3a30] hover:border-[#237b68]/40 hover:bg-[#fbfcfb]'
+                                }`}
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <span
+                                    className={`h-2 w-2 shrink-0 rounded-full ${
+                                      isCrypto ? 'bg-[#9945FF]' : 'bg-[#237b68]'
+                                    }`}
+                                  />
+                                  <span className="w-16 shrink-0 font-mono text-[12px] font-bold text-[#2b3a30]">
+                                    {token.symbol}
+                                  </span>
+                                  <span className="w-20 shrink-0 font-mono text-[11px] font-semibold text-[#237b68]">
+                                    {price}
+                                  </span>
+                                  <span className="w-14 shrink-0 text-center rounded bg-[#f0f3ee] px-1.5 py-0.5 text-[9px] font-mono font-medium text-[#5f6861]">
+                                    {isCrypto ? 'Crypto' : 'RWA'}
+                                  </span>
+                                </div>
+                                <span
+                                  className={`ml-2 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold ${
+                                    isSelected
+                                      ? 'bg-[#237b68] text-white'
+                                      : 'border border-[#cdd3ca] text-transparent'
+                                  }`}
+                                >
+                                  ✓
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Popup Action Footer */}
+                    <div className="flex items-center justify-between pt-1 text-[10px]">
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={handleAddAll}
+                          disabled={!managerAllowed || publishing || selectedMints.length === availableTokens.length}
+                          className="text-[#237b68] underline hover:text-[#185347] disabled:opacity-40"
+                        >
+                          + Select all ({availableTokens.length})
+                        </button>
+                        {selectedMints.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleClearAll}
+                            disabled={!managerAllowed || publishing}
+                            className="text-[#a14343] hover:underline"
+                          >
+                            Clear all
+                          </button>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setDropdownOpen(false)}
+                        className="rounded-lg bg-[#237b68] px-3.5 py-1.5 font-mono text-[10px] font-semibold text-white shadow-2xs hover:bg-[#1b6152]"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* The Search Input Field */}
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    if (!dropdownOpen) setDropdownOpen(true);
+                  }}
+                  onFocus={() => setDropdownOpen(true)}
+                  placeholder="Search & pick assets (e.g. AAPLx, SOL, NVDAx, BTC)..."
+                  disabled={!managerAllowed || publishing}
+                  className="w-full rounded-[14px] border border-[#aeb8ad] bg-[#fcfdf9]/70 py-2.5 pl-9 pr-9 font-mono text-[12px] text-[#2b3a30] shadow-2xs outline-none focus:border-[#237b68] disabled:opacity-55"
+                />
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-[#717b72]">
+                  🔍
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setDropdownOpen((prev) => !prev)}
+                  disabled={!managerAllowed || publishing}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-xs text-[#717b72] hover:text-[#2b3a30]"
+                  title={dropdownOpen ? 'Close popup' : 'Open popup'}
+                >
+                  <span className={`inline-block transition-transform duration-200 ${dropdownOpen ? 'rotate-180' : ''}`}>
+                    ▼
+                  </span>
+                </button>
+              </div>
+
+              {/* Selected Asset Chips */}
+              <div className="mt-1 space-y-1.5">
+                {selectedMints.length === 0 ? (
+                  <p className="text-[11px] text-[#717b72]">
+                    No assets selected yet. Click the search bar above to browse and pick RWA stocks & crypto.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedMints.map((mint) => {
+                      const token = availableTokens.find((t) => t.mint === mint);
+                      if (!token) return null;
+                      const isCrypto = token.category === 'crypto';
+                      const price = getAssetPrice(token.symbol, token.underlying);
+                      return (
+                        <span
+                          key={token.mint}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#237b68]/30 bg-white px-2.5 py-1 font-mono text-[11px] font-semibold text-[#253328] shadow-2xs"
+                        >
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${
+                              isCrypto ? 'bg-[#9945FF]' : 'bg-[#237b68]'
+                            }`}
+                          />
+                          <span>{token.symbol}</span>
+                          <span className="text-[10px] text-[#237b68] font-semibold">{price}</span>
+                          {managerAllowed && !publishing && (
+                            <button
+                              type="button"
+                              onClick={() => toggleToken(token.mint)}
+                              className="ml-1 text-[#a14343] hover:text-[#7d2f2f]"
+                              title={`Remove ${token.symbol}`}
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div className="flex items-center justify-between text-[10px] text-[#717b72]">
-              <span>Adjust stock allocations; remaining percentage stays in USDC cash automatically.</span>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  disabled={!managerAllowed || publishing}
-                  onClick={() => {
-                    const next: Record<string, number> = {};
-                    step3Tokens.forEach((t) => { next[t.mint] = 0; });
-                    setWeights(next);
-                  }}
-                  className="text-[#717b72] hover:text-[#253328] hover:underline"
-                >
-                  Reset to 100% USDC
-                </button>
-                <button
-                  type="button"
-                  disabled={!managerAllowed || publishing || step3Tokens.length === 0}
-                  onClick={() => {
-                    if (step3Tokens.length === 0) return;
-                    const perToken = Math.floor(100 / step3Tokens.length);
-                    const rem = 100 - (perToken * step3Tokens.length);
-                    const next: Record<string, number> = {};
-                    step3Tokens.forEach((t, i) => {
-                      next[t.mint] = perToken + (i === 0 ? rem : 0);
-                    });
-                    setWeights(next);
-                  }}
-                  className="font-medium text-[#237b68] hover:underline"
-                >
-                  Equally balance stocks (0% USDC)
-                </button>
+            <div className="pt-2 border-t border-[#edf1eb]">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-[#6b746c]">
+                  Target Asset Weights
+                </label>
+                <span className="font-mono text-[11px] font-bold text-[#237b68]">
+                  Total: 100% ✓ · USDC Cash: {usdcPercent}%
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between text-[10px] text-[#717b72]">
+                <span>Adjust stock allocations; remaining percentage stays in USDC cash automatically.</span>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={!managerAllowed || publishing}
+                    onClick={() => {
+                      const next: Record<string, number> = {};
+                      step3Tokens.forEach((t) => { next[t.mint] = 0; });
+                      setWeights(next);
+                    }}
+                    className="text-[#717b72] hover:text-[#253328] hover:underline"
+                  >
+                    Reset to 100% USDC
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!managerAllowed || publishing || step3Tokens.length === 0}
+                    onClick={() => {
+                      if (step3Tokens.length === 0) return;
+                      const perToken = Math.floor(100 / step3Tokens.length);
+                      const rem = 100 - (perToken * step3Tokens.length);
+                      const next: Record<string, number> = {};
+                      step3Tokens.forEach((t, i) => {
+                        next[t.mint] = perToken + (i === 0 ? rem : 0);
+                      });
+                      setWeights(next);
+                    }}
+                    className="font-medium text-[#237b68] hover:underline"
+                  >
+                    Equally balance stocks (0% USDC)
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -753,7 +1085,7 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
               </div>
               {step3Tokens.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-[#cdd3ca] p-3 text-center text-[11px] text-[#717b72]">
-                  No RWA tokens were picked for this vault.
+                  No assets picked for this vault yet. Use the search bar above to pick RWA stock and crypto assets.
                 </div>
               ) : (
                 step3Tokens.map((token) => {
@@ -763,12 +1095,25 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                     return sum + (Number(weights[t.mint]) || 0);
                   }, 0);
                   const maxAllowed = Math.max(0, 100 - otherSum);
+                  const isCrypto = token.category === 'crypto';
+                  const price = getAssetPrice(token.symbol, token.underlying);
 
                   return (
                     <div key={token.mint} className="rounded-lg border border-[#e2e6df] bg-white p-2.5 shadow-sm">
                       <div className="flex items-center justify-between text-[11px]">
-                        <div>
-                          <strong className="text-[#253328] font-mono">{token.symbol}</strong>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`h-2 w-2 shrink-0 rounded-full ${
+                              isCrypto ? 'bg-[#9945FF]' : 'bg-[#237b68]'
+                            }`}
+                          />
+                          <strong className="w-14 shrink-0 text-[#253328] font-mono font-bold">{token.symbol}</strong>
+                          <span className="w-18 shrink-0 font-mono text-[10px] font-semibold text-[#237b68]">
+                            {price}
+                          </span>
+                          <span className="rounded bg-[#f0f3ee] px-1.5 py-0.2 font-mono text-[9px] text-[#5f6861]">
+                            {isCrypto ? 'Crypto' : 'RWA'}
+                          </span>
                         </div>
                         <div className="flex items-center gap-1">
                           <input
@@ -804,7 +1149,7 @@ export function CuratorStepDrawers({vault, managerAllowed, onSeed, onActivate}: 
                       />
                       <div className="mt-1 flex items-center justify-between text-[9px] text-[#849087]">
                         <span>0%</span>
-                        <span>100%</span>
+                        <span>Max {maxAllowed}%</span>
                       </div>
                     </div>
                   );
